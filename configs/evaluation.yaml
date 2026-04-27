@@ -1,0 +1,11 @@
+evaluation:
+  metrics:
+    # Mean of squared nearest-neighbour distances between two point clouds (symmetric)
+    chamfer: true
+    # Maximum nearest-neighbour distance; sensitive to outliers
+    hausdorff: true
+    # Root mean square of nearest-neighbour distances
+    rms: true
+
+  # Output format for evaluation results
+  output_format: json
