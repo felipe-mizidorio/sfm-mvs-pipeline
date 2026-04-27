@@ -1,0 +1,34 @@
+feature_extraction:
+  # Maximum number of features to detect per image
+  max_num_features: 8192
+  # Octave at which feature detection starts; -1 means first octave is half image size
+  first_octave: -1
+
+feature_matching:
+  # Matching strategy: "exhaustive" for small datasets, "vocab_tree" for large ones
+  method: exhaustive
+  vocab_tree:
+    # Path to pre-built vocabulary tree file (required when method is vocab_tree)
+    vocab_tree_path: ""
+    # Number of nearest-neighbor images to match per query image
+    num_nearest_neighbors: 100
+
+incremental_mapping:
+  # Minimum number of inlier matches required to initialize or extend the reconstruction
+  min_num_matches: 15
+  # Maximum number of reconstructed models; stops after this many are found
+  max_num_models: 50
+
+patch_match_stereo:
+  # Input images are downsampled so their maximum side is at most this value
+  max_image_size: 2000
+  # Half-size of the patch window used for cost aggregation
+  window_radius: 5
+  # Number of random hypothesis samples per pixel per iteration
+  num_samples: 15
+
+stereo_fusion:
+  # Minimum number of consistent views required to fuse a depth sample
+  min_num_pixels: 5
+  # Maximum reprojection error (in pixels) allowed when fusing depth samples
+  max_reproj_error: 2.0

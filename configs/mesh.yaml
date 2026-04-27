@@ -1,0 +1,7 @@
+poisson_surface_reconstruction:
+  # Octree depth controlling mesh resolution; higher = finer detail but slower
+  depth: 9
+  # Scale factor applied to the bounding box before reconstruction; enlarging avoids boundary artifacts
+  scale: 1.1
+  # Whether to solve the linear system with a conjugate-gradient solver (True) or direct solver (False)
+  linear_fit: false
