@@ -1,0 +1,32 @@
+[project]
+name = "sfm-mvs-pipeline"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pycolmap (>=4.0.3,<5.0.0)",
+    "open3d (>=0.19.0,<0.20.0)",
+    "opencv-contrib-python (>=4.13.0.92,<5.0.0.0)",
+    "numpy (>=2.4.4,<3.0.0)",
+    "pyyaml (>=6.0.3,<7.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "sfm_mvs_pipeline", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+gpu = [
+    "pycolmap-cuda12 (>=4.0.3,<5.0.0)"
+]
+dev = [
+    "ruff (>=0.15.12,<0.16.0)",
+    "pyright (>=1.1.409,<2.0.0)"
+]
