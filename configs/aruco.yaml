@@ -1,0 +1,7 @@
+aruco:
+  # Physical side length of the ArUco marker square in millimetres
+  marker_length_mm: 50.0
+  # OpenCV ArUco dictionary ID (0 = DICT_4X4_50, 1 = DICT_4X4_100, 2 = DICT_4X4_250)
+  dict_id: 0
+  # Minimum number of image views required to triangulate a marker corner
+  min_views: 2

@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import numpy as np
 import pycolmap
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,8 @@ def fuse_depth_maps(
     mvs_path: Path,
     output_path: Path,
     options: dict,
+    bbox_min: list[float] | None = None,
+    bbox_max: list[float] | None = None,
 ) -> pycolmap.Reconstruction:
     depth_maps_dir = mvs_path / _DEPTH_MAPS_DIR
     if not depth_maps_dir.exists() or not any(depth_maps_dir.iterdir()):
@@ -26,6 +29,13 @@ def fuse_depth_maps(
     fusion_options = pycolmap.StereoFusionOptions()
     fusion_options.min_num_pixels = options["min_num_pixels"]
     fusion_options.max_reproj_error = options["max_reproj_error"]
+
+    if bbox_min is not None and bbox_max is not None:
+        fusion_options.bounding_box = (
+            np.array(bbox_min, dtype=np.float64),
+            np.array(bbox_max, dtype=np.float64),
+        )
+        logger.info("Bounding box clipping: min=%s, max=%s", bbox_min, bbox_max)
 
     logger.info(
         "Fusing depth maps from '%s' into '%s' "
