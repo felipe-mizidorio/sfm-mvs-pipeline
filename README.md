@@ -1,6 +1,6 @@
 # sfm-mvs-pipeline
 
-A Python pipeline for 3D reconstruction using Structure-from-Motion (SfM) and Multi-View Stereo (MVS).
+A Python pipeline for 3D reconstruction using Structure-from-Motion (SfM) and Multi-View Stereo (MVS), with support for metric scale recovery from ArUco markers and known camera intrinsics injection for neonatal cranial morphometry.
 
 ---
 
@@ -13,8 +13,9 @@ The pipeline covers the full reconstruction workflow from raw images to a dense 
 3. **Sparse Reconstruction (SfM)** — Incremental bundle adjustment via COLMAP
 4. **Dense Reconstruction (MVS)** — PatchMatch Stereo depth map estimation
 5. **Depth Map Fusion** — Stereo fusion into a dense point cloud
-6. **Surface Reconstruction** — Poisson Surface Reconstruction
-7. **Evaluation** — Chamfer Distance, Hausdorff Distance, and RMS metrics
+6. **Metric Scale Recovery** — ArUco marker triangulation to convert SfM units to millimetres
+7. **Surface Reconstruction** — Poisson Surface Reconstruction
+8. **Evaluation** — Chamfer Distance, Hausdorff Distance, and RMS metrics
 
 ---
 
@@ -27,6 +28,7 @@ sfm-mvs-pipeline/
 │       ├── sfm/          # Feature extraction, matching, bundle adjustment
 │       ├── mvs/          # Dense reconstruction (PatchMatch Stereo, fusion)
 │       ├── mesh/         # Surface reconstruction (Poisson)
+│       ├── scale/        # ArUco-based metric scale recovery
 │       └── evaluation/   # 3D evaluation metrics
 ├── scripts/              # Entrypoints to run the full pipeline
 ├── notebooks/            # Exploratory analysis and result visualisation
@@ -97,16 +99,39 @@ poetry run python scripts/run_pipeline.py \
 
 ### CLI Reference
 
+#### Core
+
 | Argument | Default | Description |
 |---|---|---|
-| `--image-dir` | *(required)* | Directory containing input images |
+| `--image-dir` | *(required)* | Directory of input images; supports subdirectories |
 | `--output-dir` | *(required)* | Root directory for all pipeline outputs |
 | `--colmap-config` | `configs/colmap.yaml` | Path to COLMAP config file |
 | `--mesh-config` | `configs/mesh.yaml` | Path to mesh reconstruction config |
 | `--evaluation-config` | `configs/evaluation.yaml` | Path to evaluation config |
+| `--aruco-config` | `configs/aruco.yaml` | Path to ArUco scale recovery config |
 | `--ground-truth` | `None` | Path to ground truth `.ply` for evaluation (optional) |
 | `--skip-mvs` | `False` | Stop after sparse reconstruction (useful on CPU-only machines) |
 | `--device` | `auto` | Device for pycolmap: `auto` or `cpu` |
+
+#### Camera calibration
+
+| Argument | Default | Description |
+|---|---|---|
+| `--camera-model` | `None` | COLMAP camera model name (e.g. `OPENCV`, `PINHOLE`, `SIMPLE_RADIAL`). When set, a single shared camera is used for all images and self-calibration is skipped. |
+| `--camera-params` | `None` | Space-separated intrinsics matching the model. For `OPENCV`: `"fx fy cx cy k1 k2 p1 p2"`. For `PINHOLE`: `"fx fy cx cy"`. |
+
+#### Preprocessing pipeline integration
+
+| Argument | Default | Description |
+|---|---|---|
+| `--frames-manifest` | `None` | Path to a JSON manifest from the ArUco preprocessing stage. Keys: `"frames"` (list of filenames to use) and optionally `"marker_detections"` (`{frame: [{id, corners}]}`) to skip re-detection during scale recovery. |
+
+#### Fusion clipping
+
+| Argument | Default | Description |
+|---|---|---|
+| `--bbox-min X Y Z` | `None` | Minimum corner of an axis-aligned bounding box applied during stereo fusion. Useful to discard background and retain only the head volume. |
+| `--bbox-max X Y Z` | `None` | Maximum corner of the bounding box. Both `--bbox-min` and `--bbox-max` must be provided together. |
 
 ### Example: sparse-only run on CPU
 
@@ -126,6 +151,37 @@ poetry run python scripts/run_pipeline.py \
   --output-dir data/processed/my_scene \
   --ground-truth data/raw/my_scene_gt.ply
 ```
+
+### Example: neonatal capture with known intrinsics and metric scale
+
+```bash
+poetry run python scripts/run_pipeline.py \
+  --image-dir data/raw/session_01/frames \
+  --output-dir data/processed/session_01 \
+  --camera-model OPENCV \
+  --camera-params "3024 3024 2016 1512 0.12 -0.05 0.0 0.0" \
+  --frames-manifest data/raw/session_01/manifest.json \
+  --bbox-min -0.15 -0.15 -0.05 \
+  --bbox-max  0.15  0.15  0.25
+```
+
+Metric scale is applied automatically when `marker_length_mm` is set in `configs/aruco.yaml`. The output `mesh.ply` will have coordinates in millimetres.
+
+### Example: using a preprocessing manifest
+
+The manifest JSON produced by the ArUco preprocessing pipeline:
+
+```json
+{
+  "frames": ["frame_042.jpg", "frame_043.jpg", "frame_101.jpg"],
+  "marker_detections": {
+    "frame_042.jpg": [{"id": 0, "corners": [[120,80],[160,80],[160,120],[120,120]]}],
+    "frame_101.jpg": [{"id": 0, "corners": [[200,95],[240,95],[240,135],[200,135]]}]
+  }
+}
+```
+
+Pass it with `--frames-manifest path/to/manifest.json`. Only the listed frames are passed to COLMAP; stored marker detections are reused for scale recovery so images do not need to be re-read.
 
 ### Outputs
 
@@ -168,6 +224,15 @@ All pipeline parameters are controlled by YAML files in `configs/`.
 | `depth` | Octree depth; higher = finer detail, slower (default: 9) |
 | `scale` | Bounding box scale factor; increase to avoid boundary artifacts |
 | `linear_fit` | Use conjugate-gradient solver (`true`) or direct solver (`false`) |
+| `density_threshold` | Poisson density quantile below which vertices are removed (default: 0.01); reduces floating geometry at mesh boundaries |
+
+### `configs/aruco.yaml`
+
+| Key | Description |
+|---|---|
+| `marker_length_mm` | Physical side length of the ArUco square in millimetres. Set to `0` or omit to disable scale recovery. |
+| `dict_id` | OpenCV ArUco dictionary ID (default: `0` = `DICT_4X4_50`) |
+| `min_views` | Minimum number of registered views required to triangulate a marker corner (default: `2`) |
 
 ### `configs/evaluation.yaml`
 
