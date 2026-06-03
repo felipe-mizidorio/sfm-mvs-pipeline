@@ -1,6 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pycolmap
 import pytest
 
 from sfm_mvs_pipeline.sfm.feature_extraction import extract_features
@@ -77,7 +78,7 @@ class TestFeatureMatching:
         with patch("pycolmap.match_exhaustive") as mock_fn:
             match_features(database_path, _MATCHING_OPTIONS)
 
-        mock_fn.assert_called_once_with(database_path=database_path)
+        mock_fn.assert_called_once_with(database_path=database_path, device=pycolmap.Device.auto)
 
     def test_feature_matching_unknown_method_raises(self, tmp_path):
         database_path = tmp_path / "colmap.db"

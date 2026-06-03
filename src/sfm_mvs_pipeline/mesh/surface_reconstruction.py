@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 
+import numpy as np
 import open3d as o3d
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ def reconstruct_surface(
     if not pcd.has_normals():
         logger.info("Point cloud has no normals — estimating normals")
         pcd.estimate_normals()
+        pcd.orient_normals_consistent_tangent_plane(k=30)
 
     logger.info(
         "Running Poisson Surface Reconstruction (depth=%d, scale=%.2f, linear_fit=%s)",
@@ -29,11 +31,22 @@ def reconstruct_surface(
         options["linear_fit"],
     )
 
-    mesh, _ = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
         pcd=pcd,
         depth=options["depth"],
         scale=options["scale"],
         linear_fit=options["linear_fit"],
+    )
+
+    density_threshold = options.get("density_threshold", 0.01)
+    densities_np = np.asarray(densities)
+    cutoff = np.quantile(densities_np, density_threshold)
+    vertices_to_remove = densities_np < cutoff
+    mesh.remove_vertices_by_mask(vertices_to_remove)
+    logger.info(
+        "Density trimming: removed %d low-density vertices (quantile=%.3f)",
+        int(vertices_to_remove.sum()),
+        density_threshold,
     )
 
     logger.info(

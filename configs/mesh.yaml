@@ -5,3 +5,5 @@ poisson_surface_reconstruction:
   scale: 1.1
   # Whether to solve the linear system with a conjugate-gradient solver (True) or direct solver (False)
   linear_fit: false
+  # Vertices below this quantile of the Poisson density array are removed (reduces floating geometry)
+  density_threshold: 0.01

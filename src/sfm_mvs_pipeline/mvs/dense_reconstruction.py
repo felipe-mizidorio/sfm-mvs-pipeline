@@ -34,6 +34,12 @@ def run_dense_reconstruction(
         image_path=image_dir,
     )
 
+    if not pycolmap.has_cuda:
+        raise RuntimeError(
+            "PatchMatch Stereo requires CUDA, but pycolmap was built without CUDA support. "
+            "Install the 'gpu' dependency group (pycolmap-cuda12) or rerun with --skip-mvs."
+        )
+
     patch_match_options = pycolmap.PatchMatchOptions()
     patch_match_options.max_image_size = options["max_image_size"]
     patch_match_options.window_radius = options["window_radius"]

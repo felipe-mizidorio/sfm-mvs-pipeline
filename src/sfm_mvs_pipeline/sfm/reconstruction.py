@@ -23,6 +23,7 @@ def run_incremental_mapping(
     mapping_options = pycolmap.IncrementalPipelineOptions()
     mapping_options.min_num_matches = options["min_num_matches"]
     mapping_options.max_num_models = options["max_num_models"]
+    mapping_options.ba_use_gpu = device != pycolmap.Device.cpu
 
     logger.info(
         "Running incremental mapping (min_num_matches=%d, max_num_models=%d)",
