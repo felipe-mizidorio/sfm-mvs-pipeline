@@ -154,4 +154,4 @@ class TestFeatureMatching:
              patch("pycolmap.SequentialPairingOptions", return_value=mock_pairing):
             match_features(database_path, options, pycolmap.Device.cpu)
         mock_fn.assert_called_once()
-        assert mock_pairing.overlap == 10  # default when key absent
+        assert mock_pairing.overlap == 5  # default when key absent
