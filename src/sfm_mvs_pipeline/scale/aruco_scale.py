@@ -182,8 +182,9 @@ def _projection_matrix(
     image = reconstruction.images[image_id]
     camera = reconstruction.cameras[image.camera_id]
     K = np.array(camera.calibration_matrix())
-    R = image.cam_from_world.rotation.matrix()
-    t = image.cam_from_world.translation.reshape(3, 1)
+    cfw = image.cam_from_world
+    R = cfw.rotation.matrix()
+    t = cfw.translation.reshape(3, 1)
     return K @ np.hstack([R, t])
 
 
