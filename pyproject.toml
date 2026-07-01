@@ -12,15 +12,16 @@ dependencies = [
     "open3d (>=0.19.0,<0.20.0)",
     "opencv-contrib-python (>=4.13.0.92,<5.0.0.0)",
     "numpy (>=2.4.4,<3.0.0)",
-    "pyyaml (>=6.0.3,<7.0.0)"
+    "pyyaml (>=6.0.3,<7.0.0)",
+    "plotly (>=6.7.0,<7.0.0)"
 ]
 
-[tool.poetry]
-packages = [{include = "sfm_mvs_pipeline", from = "src"}]
+[tool.hatch.build.targets.wheel]
+packages = ["src/sfm_mvs_pipeline"]
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 gpu = [
@@ -33,6 +34,5 @@ dev = [
     "nbstripout (>=0.9.1,<0.10.0)"
 ]
 notebook = [
-    "plotly (>=6.7.0,<7.0.0)",
     "jupyterlab (>=4.5.6,<5.0.0)"
 ]

@@ -64,13 +64,13 @@ cd sfm-mvs-pipeline
 Install core dependencies (CPU, e.g. development machine without GPU):
 
 ```bash
-poetry install
+uv sync
 ```
 
 Install with GPU support (NVIDIA GPU + CUDA 12):
 
 ```bash
-poetry install --with gpu
+uv sync --group gpu
 ```
 
 > **Note:** The `gpu` group replaces the CPU-only `pycolmap` with `pycolmap-cuda12`, which enables GPU-accelerated feature extraction, matching, and MVS. The CUDA Toolkit must be installed separately on Linux.
@@ -78,13 +78,13 @@ poetry install --with gpu
 Install dev tools (linting, type checking, tests):
 
 ```bash
-poetry install --with dev
+uv sync --group dev
 ```
 
 Install notebook dependencies:
 
 ```bash
-poetry install --with notebook
+uv sync --group notebook
 ```
 
 ---
@@ -92,7 +92,7 @@ poetry install --with notebook
 ## Running the Pipeline
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene
 ```
@@ -136,7 +136,7 @@ poetry run python scripts/run_pipeline.py \
 ### Example: sparse-only run on CPU
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene \
   --device cpu \
@@ -146,7 +146,7 @@ poetry run python scripts/run_pipeline.py \
 ### Example: full run with evaluation
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene \
   --ground-truth data/raw/my_scene_gt.ply
@@ -155,7 +155,7 @@ poetry run python scripts/run_pipeline.py \
 ### Example: neonatal capture with known intrinsics and metric scale
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/session_01/frames \
   --output-dir data/processed/session_01 \
   --camera-model OPENCV \
@@ -250,14 +250,14 @@ All pipeline parameters are controlled by YAML files in `configs/`.
 ### Linting and type checking
 
 ```bash
-poetry run ruff check src/
-poetry run pyright src/
+uv run ruff check src/
+uv run pyright src/
 ```
 
 ### Tests
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ### Notebooks
@@ -265,5 +265,5 @@ poetry run pytest
 Launch JupyterLab after installing the `notebook` group:
 
 ```bash
-poetry run jupyter lab
+uv run jupyter lab
 ```
