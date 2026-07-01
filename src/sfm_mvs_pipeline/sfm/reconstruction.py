@@ -45,3 +45,30 @@ def run_incremental_mapping(
     )
 
     return reconstructions
+
+
+def load_best_reconstruction(sparse_dir: Path) -> tuple[pycolmap.Reconstruction, Path]:
+    if not sparse_dir.exists():
+        raise FileNotFoundError(f"sparse_dir does not exist: {sparse_dir}")
+
+    model_paths = sorted(sparse_dir.iterdir(), key=lambda p: int(p.name))
+    if not model_paths:
+        raise FileNotFoundError(f"No sparse models found under '{sparse_dir}'")
+
+    best_path = model_paths[0]
+    best_recon = pycolmap.Reconstruction(str(best_path))
+    best_count = best_recon.num_reg_images()
+
+    for path in model_paths[1:]:
+        recon = pycolmap.Reconstruction(str(path))
+        count = recon.num_reg_images()
+        if count > best_count:
+            best_recon, best_path, best_count = recon, path, count
+
+    logger.info(
+        "Selected sparse model '%s' with %d registered images (of %d candidate model(s))",
+        best_path,
+        best_count,
+        len(model_paths),
+    )
+    return best_recon, best_path
