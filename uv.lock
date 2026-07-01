@@ -2507,6 +2507,7 @@ dependencies = [
     { name = "numpy" },
     { name = "open3d" },
     { name = "opencv-contrib-python" },
+    { name = "plotly" },
     { name = "pycolmap" },
     { name = "pyyaml" },
 ]
@@ -2523,7 +2524,6 @@ gpu = [
 ]
 notebook = [
     { name = "jupyterlab" },
-    { name = "plotly" },
 ]
 
 [package.metadata]
@@ -2531,6 +2531,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.4,<3.0.0" },
     { name = "open3d", specifier = ">=0.19.0,<0.20.0" },
     { name = "opencv-contrib-python", specifier = ">=4.13.0.92,<5.0.0.0" },
+    { name = "plotly", specifier = ">=6.7.0,<7.0.0" },
     { name = "pycolmap", specifier = ">=4.0.3,<5.0.0" },
     { name = "pyyaml", specifier = ">=6.0.3,<7.0.0" },
 ]
@@ -2543,10 +2544,7 @@ dev = [
     { name = "ruff", specifier = ">=0.15.12,<0.16.0" },
 ]
 gpu = [{ name = "pycolmap-cuda12", specifier = ">=4.0.3,<5.0.0" }]
-notebook = [
-    { name = "jupyterlab", specifier = ">=4.5.6,<5.0.0" },
-    { name = "plotly", specifier = ">=6.7.0,<7.0.0" },
-]
+notebook = [{ name = "jupyterlab", specifier = ">=4.5.6,<5.0.0" }]
 
 [[package]]
 name = "six"

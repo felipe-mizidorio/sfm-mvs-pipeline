@@ -7,3 +7,17 @@ poisson_surface_reconstruction:
   linear_fit: false
   # Vertices below this quantile of the Poisson density array are removed (reduces floating geometry)
   density_threshold: 0.01
+  # Keep only the largest connected component after Poisson reconstruction (removes background noise)
+  keep_largest_component: true
+  # Taubin smoothing applied after LCC — removes high-frequency wrinkles from MVS noise
+  # Remove or set iterations: 0 to skip
+  taubin_smoothing:
+    iterations: 10
+    lambda_filter: 0.5
+    mu: -0.53
+
+point_cloud_filtering:
+  # neighbourhood size for mean distance computation
+  nb_neighbors: 20
+  # remove points whose mean neighbour distance exceeds mean + std_ratio * std_dev
+  std_ratio: 2.0

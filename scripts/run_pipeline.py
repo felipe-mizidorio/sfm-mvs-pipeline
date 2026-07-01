@@ -10,9 +10,13 @@ import pycolmap
 import yaml
 
 from sfm_mvs_pipeline.evaluation.metrics import evaluate
-from sfm_mvs_pipeline.mesh.surface_reconstruction import reconstruct_surface
 from sfm_mvs_pipeline.mvs.dense_reconstruction import run_dense_reconstruction
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
+from sfm_mvs_pipeline.pipeline.orchestration import (
+    run_poisson_lcc_and_visualize,
+    run_sor_and_visualize,
+    write_pipeline_manifest,
+)
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
@@ -151,6 +155,7 @@ def main() -> None:
     mesh_cfg = _load_yaml(args.mesh_config)
     eval_cfg = _load_yaml(args.evaluation_config)
     aruco_cfg = _load_yaml(args.aruco_config).get("aruco", {})
+    filter_cfg = mesh_cfg["point_cloud_filtering"]
 
     device = pycolmap.Device.cpu if args.device == "cpu" else pycolmap.Device.auto
 
@@ -181,8 +186,8 @@ def main() -> None:
             len(manifest_detections or {}),
         )
 
-    # --- Step 1: Feature extraction ---
-    logger.info("=== Step 1/6: Feature extraction ===")
+    # --- Step 1/7: Feature extraction ---
+    logger.info("=== Step 1/7: Feature extraction ===")
     extract_features(
         database_path=database_path,
         image_dir=args.image_dir,
@@ -193,16 +198,16 @@ def main() -> None:
         image_names=manifest_frames,
     )
 
-    # --- Step 2: Feature matching ---
-    logger.info("=== Step 2/6: Feature matching ===")
+    # --- Step 2/7: Feature matching ---
+    logger.info("=== Step 2/7: Feature matching ===")
     match_features(
         database_path=database_path,
         options=colmap_cfg["feature_matching"],
         device=device,
     )
 
-    # --- Step 3: Sparse reconstruction ---
-    logger.info("=== Step 3/6: Sparse (incremental) reconstruction ===")
+    # --- Step 3/7: Sparse reconstruction ---
+    logger.info("=== Step 3/7: Sparse (incremental) reconstruction ===")
     reconstructions = run_incremental_mapping(
         database_path=database_path,
         image_dir=args.image_dir,
@@ -230,8 +235,8 @@ def main() -> None:
         logger.info("--skip-mvs set: stopping after sparse reconstruction.")
         return
 
-    # --- Step 4: Dense reconstruction (undistortion + PatchMatch Stereo) ---
-    logger.info("=== Step 4/6: Dense reconstruction ===")
+    # --- Step 4/7: Dense reconstruction (undistortion + PatchMatch Stereo) ---
+    logger.info("=== Step 4/7: Dense reconstruction ===")
     run_dense_reconstruction(
         sparse_path=sparse_model_path,
         image_dir=args.image_dir,
@@ -239,8 +244,8 @@ def main() -> None:
         options=colmap_cfg["patch_match_stereo"],
     )
 
-    # --- Step 5: Stereo fusion ---
-    logger.info("=== Step 5/6: Stereo fusion ===")
+    # --- Step 5/7: Stereo fusion ---
+    logger.info("=== Step 5/7: Stereo fusion ===")
     fuse_depth_maps(
         mvs_path=mvs_dir,
         output_path=dense_ply,
@@ -249,7 +254,11 @@ def main() -> None:
         bbox_max=args.bbox_max,
     )
 
-    # --- Metric scale recovery (G1 + G6) ---
+    # --- Step 5b/7: Point cloud filtering (SOR) + visualization ---
+    logger.info("=== Step 5b/7: Point cloud filtering (SOR) ===")
+    dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
+
+    # --- Metric scale recovery ---
     scale_factor: float | None = None
     marker_length_mm = aruco_cfg.get("marker_length_mm")
     if marker_length_mm:
@@ -264,20 +273,28 @@ def main() -> None:
                 min_views=int(aruco_cfg.get("min_views", 2)),
             )
             logger.info("Scale factor: %.6f mm/unit", scale_factor)
-            apply_scale_to_ply(dense_ply, scale_factor)
+            apply_scale_to_ply(dense_filtered_ply, scale_factor)
         except RuntimeError as exc:
             logger.warning("Scale recovery failed: %s — outputs remain in SfM units.", exc)
 
-    # --- Step 6: Surface reconstruction ---
-    logger.info("=== Step 6/6: Surface (Poisson) reconstruction ===")
-    reconstruct_surface(
-        input_ply=dense_ply,
-        output_ply=mesh_ply,
-        options=mesh_cfg["poisson_surface_reconstruction"],
+    # --- Step 6/7: Poisson reconstruction + LCC + visualization ---
+    logger.info("=== Step 6/7: Surface (Poisson) reconstruction + LCC ===")
+    _, lcc_stats = run_poisson_lcc_and_visualize(
+        dense_filtered_ply, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
     )
 
     if scale_factor is not None:
         apply_scale_to_mesh(mesh_ply, scale_factor)
+
+    # --- Step 7/7: Pipeline manifest ---
+    write_pipeline_manifest(
+        output_dir,
+        "run_pipeline.py",
+        sor_stats,
+        lcc_stats,
+        mesh_cfg["poisson_surface_reconstruction"],
+        scale_factor,
+    )
 
     # --- Optional: Evaluation ---
     if args.ground_truth is not None:
