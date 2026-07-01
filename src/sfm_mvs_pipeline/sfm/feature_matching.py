@@ -20,6 +20,16 @@ def match_features(
     if method == "exhaustive":
         pycolmap.match_exhaustive(database_path=database_path, device=device)
 
+    elif method == "sequential":
+        seq_opts = options.get("sequential", {})
+        pairing_options = pycolmap.SequentialPairingOptions()
+        pairing_options.overlap = int(seq_opts.get("overlap", 5))
+        pycolmap.match_sequential(
+            database_path=database_path,
+            pairing_options=pairing_options,
+            device=device,
+        )
+
     elif method == "vocab_tree":
         vt_opts = options["vocab_tree"]
         pairing_options = pycolmap.VocabTreePairingOptions()
@@ -33,7 +43,8 @@ def match_features(
 
     else:
         raise ValueError(
-            f"Unknown matching method '{method}'. Expected 'exhaustive' or 'vocab_tree'."
+            f"Unknown matching method '{method}'."
+            " Expected 'exhaustive', 'sequential', or 'vocab_tree'."
         )
 
     logger.info("Feature matching complete: %s", database_path)
