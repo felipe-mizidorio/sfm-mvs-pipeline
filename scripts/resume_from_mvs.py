@@ -28,7 +28,12 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
     run_sor_and_visualize,
     write_pipeline_manifest,
 )
-from sfm_mvs_pipeline.scale.aruco_scale import apply_scale_to_mesh, apply_scale_to_ply, recover_scale
+from sfm_mvs_pipeline.scale.aruco_scale import (
+    apply_scale_to_mesh,
+    apply_scale_to_ply,
+    recover_scale_safe,
+)
+from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -135,14 +140,12 @@ def main() -> None:
         manifest_data = json.loads(args.frames_manifest.read_text())
         manifest_detections = manifest_data.get("marker_detections")
 
-    sparse_models = sorted(sparse_dir.iterdir(), key=lambda p: int(p.name))
-    best_sparse = max(
-        sparse_models,
-        key=lambda p: pycolmap.Reconstruction(str(p)).num_reg_images(),
+    reconstruction, best_sparse = load_best_reconstruction(sparse_dir)
+    logger.info(
+        "Loaded sparse model from '%s': %d registered images",
+        best_sparse,
+        reconstruction.num_reg_images(),
     )
-    logger.info("Loading sparse model from '%s'", best_sparse)
-    reconstruction = pycolmap.Reconstruction(str(best_sparse))
-    logger.info("Loaded: %d registered images", reconstruction.num_reg_images())
 
     # --- Step 1: Stereo fusion ---
     if args.skip_fusion:
@@ -185,22 +188,15 @@ def main() -> None:
         input_for_poisson = cropped_ply
 
     # --- Step 4: Scale recovery ---
-    scale_factor = None
     marker_length_mm = aruco_cfg.get("marker_length_mm")
-    if marker_length_mm:
-        logger.info("=== Scale recovery ===")
-        try:
-            scale_factor = recover_scale(
-                reconstruction=reconstruction,
-                image_dir=args.image_dir,
-                marker_length_mm=float(marker_length_mm),
-                aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
-                detections=manifest_detections,
-                min_views=int(aruco_cfg.get("min_views", 2)),
-            )
-            logger.info("Scale factor: %.6f mm/unit", scale_factor)
-        except RuntimeError as exc:
-            logger.warning("Scale recovery failed: %s — outputs remain in SfM units.", exc)
+    scale_factor = recover_scale_safe(
+        reconstruction=reconstruction,
+        image_dir=args.image_dir,
+        marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
+        aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
+        detections=manifest_detections,
+        min_views=int(aruco_cfg.get("min_views", 2)),
+    )
 
     # --- Step 5: Poisson + LCC + visualization ---
     logger.info("=== Poisson surface reconstruction + LCC ===")
