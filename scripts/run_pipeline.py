@@ -20,7 +20,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
-    recover_scale,
+    recover_scale_safe,
 )
 from sfm_mvs_pipeline.sfm.feature_extraction import extract_features
 from sfm_mvs_pipeline.sfm.feature_matching import match_features
@@ -264,23 +264,17 @@ def main() -> None:
     dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
 
     # --- Metric scale recovery ---
-    scale_factor: float | None = None
     marker_length_mm = aruco_cfg.get("marker_length_mm")
-    if marker_length_mm:
-        logger.info("=== Scale recovery: detecting ArUco markers ===")
-        try:
-            scale_factor = recover_scale(
-                reconstruction=reconstructions[best_model_idx],
-                image_dir=args.image_dir,
-                marker_length_mm=float(marker_length_mm),
-                aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
-                detections=manifest_detections,
-                min_views=int(aruco_cfg.get("min_views", 2)),
-            )
-            logger.info("Scale factor: %.6f mm/unit", scale_factor)
-            apply_scale_to_ply(dense_filtered_ply, scale_factor)
-        except RuntimeError as exc:
-            logger.warning("Scale recovery failed: %s — outputs remain in SfM units.", exc)
+    scale_factor = recover_scale_safe(
+        reconstruction=reconstructions[best_model_idx],
+        image_dir=args.image_dir,
+        marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
+        aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
+        detections=manifest_detections,
+        min_views=int(aruco_cfg.get("min_views", 2)),
+    )
+    if scale_factor is not None:
+        apply_scale_to_ply(dense_filtered_ply, scale_factor)
 
     # --- Step 6/7: Poisson reconstruction + LCC + visualization ---
     logger.info("=== Step 6/7: Surface (Poisson) reconstruction + LCC ===")
