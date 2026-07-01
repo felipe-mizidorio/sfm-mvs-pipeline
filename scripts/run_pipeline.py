@@ -176,6 +176,7 @@ def main() -> None:
     # --- Parse preprocessing manifest (G3) ---
     manifest_frames: list[str] | None = None
     manifest_detections: dict | None = None
+    mask_path: Path | None = None
     if args.frames_manifest is not None:
         manifest_data = json.loads(args.frames_manifest.read_text())
         manifest_frames = manifest_data.get("frames")
@@ -185,6 +186,9 @@ def main() -> None:
             len(manifest_frames or []),
             len(manifest_detections or {}),
         )
+        if manifest_data.get("mask_dir"):
+            mask_path = args.image_dir / manifest_data["mask_dir"]
+            logger.info("Using mask directory: '%s'", mask_path)
 
     # --- Step 1/7: Feature extraction ---
     logger.info("=== Step 1/7: Feature extraction ===")
@@ -196,6 +200,7 @@ def main() -> None:
         camera_model=args.camera_model,
         camera_params=args.camera_params,
         image_names=manifest_frames,
+        mask_path=mask_path,
     )
 
     # --- Step 2/7: Feature matching ---
