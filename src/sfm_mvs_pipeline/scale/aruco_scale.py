@@ -143,6 +143,40 @@ def recover_scale(
     return scale_factor
 
 
+def recover_scale_safe(
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    marker_length_mm: float | None,
+    aruco_dict_id: int,
+    detections: dict[str, list[dict]] | None,
+    min_views: int,
+) -> float | None:
+    """Run recover_scale with the log/skip/catch pattern shared by every pipeline entry script.
+
+    Returns None if marker_length_mm is falsy (scale recovery disabled) or if
+    recover_scale raises RuntimeError (logged as a warning). Otherwise returns
+    the recovered mm/reconstruction-unit factor.
+    """
+    if not marker_length_mm:
+        return None
+
+    logger.info("=== Scale recovery: detecting ArUco markers ===")
+    try:
+        scale_factor = recover_scale(
+            reconstruction=reconstruction,
+            image_dir=image_dir,
+            marker_length_mm=marker_length_mm,
+            aruco_dict_id=aruco_dict_id,
+            detections=detections,
+            min_views=min_views,
+        )
+        logger.info("Scale factor: %.6f mm/unit", scale_factor)
+        return scale_factor
+    except RuntimeError as exc:
+        logger.warning("Scale recovery failed: %s — outputs remain in SfM units.", exc)
+        return None
+
+
 def apply_scale_to_ply(ply_path: Path, scale: float) -> None:
     """Multiply all XYZ coordinates in a point-cloud PLY by scale in-place."""
     pcd = o3d.io.read_point_cloud(str(ply_path))

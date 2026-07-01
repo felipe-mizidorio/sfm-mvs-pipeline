@@ -1,7 +1,7 @@
 """Tests for metric scale recovery from ArUco markers."""
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import open3d as o3d
@@ -11,6 +11,7 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
     recover_scale,
+    recover_scale_safe,
 )
 
 
@@ -188,3 +189,68 @@ def test_recover_scale_no_markers_raises(tmp_path):
             detections={},
             min_views=2,
         )
+
+
+# ---------------------------------------------------------------------------
+# recover_scale_safe
+# ---------------------------------------------------------------------------
+
+def test_recover_scale_safe_returns_none_when_marker_length_falsy():
+    mock_recon = MagicMock()
+    with patch("sfm_mvs_pipeline.scale.aruco_scale.recover_scale") as mock_recover:
+        result = recover_scale_safe(
+            reconstruction=mock_recon,
+            image_dir=Path("/nonexistent"),
+            marker_length_mm=None,
+            aruco_dict_id=0,
+            detections=None,
+            min_views=2,
+        )
+
+    assert result is None
+    mock_recover.assert_not_called()
+
+
+def test_recover_scale_safe_returns_factor_on_success():
+    mock_recon = MagicMock()
+    with patch(
+        "sfm_mvs_pipeline.scale.aruco_scale.recover_scale", return_value=5.0
+    ) as mock_recover:
+        result = recover_scale_safe(
+            reconstruction=mock_recon,
+            image_dir=Path("/nonexistent"),
+            marker_length_mm=50.0,
+            aruco_dict_id=0,
+            detections={"frame.jpg": []},
+            min_views=2,
+        )
+
+    assert result == 5.0
+    mock_recover.assert_called_once_with(
+        reconstruction=mock_recon,
+        image_dir=Path("/nonexistent"),
+        marker_length_mm=50.0,
+        aruco_dict_id=0,
+        detections={"frame.jpg": []},
+        min_views=2,
+    )
+
+
+def test_recover_scale_safe_returns_none_on_runtime_error(caplog):
+    mock_recon = MagicMock()
+    with patch(
+        "sfm_mvs_pipeline.scale.aruco_scale.recover_scale",
+        side_effect=RuntimeError("No ArUco markers could be triangulated"),
+    ):
+        with caplog.at_level("WARNING"):
+            result = recover_scale_safe(
+                reconstruction=mock_recon,
+                image_dir=Path("/nonexistent"),
+                marker_length_mm=50.0,
+                aruco_dict_id=0,
+                detections=None,
+                min_views=2,
+            )
+
+    assert result is None
+    assert "Scale recovery failed" in caplog.text
