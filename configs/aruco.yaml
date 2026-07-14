@@ -5,3 +5,14 @@ aruco:
   dict_id: 2
   # Minimum number of image views required to triangulate a marker corner
   min_views: 2
+  # Independent scale sanity check: known physical center-to-center distances
+  # between markers on the rigid cap, in millimetres. Measured with a ruler on
+  # the actual cap. Empty list disables the check. Exceeding the tolerance
+  # never aborts the run — it logs a prominent warning and is recorded in
+  # pipeline_manifest.json -> scale_sanity_check for downstream gating.
+  layout_check:
+    known_distances_mm: []
+    #  - ids: [0, 1]
+    #    distance_mm: 80.0
+    # Residual (percent of the expected distance) above which the check warns.
+    warn_tolerance_pct: 5.0

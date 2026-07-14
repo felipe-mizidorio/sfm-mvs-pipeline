@@ -199,24 +199,27 @@ def recover_scale(
     return _scale_from_marker_corners(corners_by_marker, marker_length_mm)
 
 
-def recover_scale_and_markers_safe(
+def recover_scale_details_safe(
     reconstruction: pycolmap.Reconstruction,
     image_dir: Path,
     marker_length_mm: float | None,
     aruco_dict_id: int,
     detections: dict[str, list[dict]] | None,
     min_views: int,
-) -> tuple[float | None, np.ndarray | None]:
-    """Recover scale and triangulated marker corner positions; never raises.
+) -> tuple[float | None, np.ndarray | None, dict[int, dict[int, np.ndarray]] | None]:
+    """Recover scale, flattened corner points, and per-marker corners; never raises.
 
-    Returns (scale_factor, marker_points) where marker_points is an (N, 3)
-    array of triangulated ArUco corner positions in SfM units — the input for
-    automatic head-crop sizing. Both are None if marker_length_mm is falsy
-    (scale recovery disabled) or if recovery fails (logged as a warning):
-    without a valid scale the marker positions cannot size a metric crop.
+    Returns (scale_factor, marker_points, corners_by_marker):
+    - marker_points is an (N, 3) array of triangulated ArUco corner positions
+      in SfM units — the input for automatic head-crop sizing.
+    - corners_by_marker is {marker_id: {corner_index: xyz}} — the input for
+      the independent layout-based scale sanity check.
+    All are None if marker_length_mm is falsy (scale recovery disabled) or if
+    recovery fails (logged as a warning): without a valid scale the marker
+    positions cannot size a metric crop.
     """
     if not marker_length_mm:
-        return None, None
+        return None, None, None
 
     logger.info("=== Scale recovery: detecting ArUco markers ===")
     try:
@@ -229,15 +232,35 @@ def recover_scale_and_markers_safe(
         )
         scale_factor = _scale_from_marker_corners(corners_by_marker, marker_length_mm)
         logger.info("Scale factor: %.6f mm/unit", scale_factor)
-        return scale_factor, marker_corner_points(corners_by_marker)
+        return scale_factor, marker_corner_points(corners_by_marker), corners_by_marker
     except RuntimeError as exc:
         logger.warning("Scale recovery failed: %s — outputs remain in SfM units.", exc)
-        return None, None
+        return None, None, None
     except Exception:
         logger.exception(
             "Scale recovery crashed unexpectedly — outputs remain in SfM units."
         )
-        return None, None
+        return None, None, None
+
+
+def recover_scale_and_markers_safe(
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    marker_length_mm: float | None,
+    aruco_dict_id: int,
+    detections: dict[str, list[dict]] | None,
+    min_views: int,
+) -> tuple[float | None, np.ndarray | None]:
+    """recover_scale_details_safe for callers that don't need per-marker corners."""
+    scale_factor, marker_points, _ = recover_scale_details_safe(
+        reconstruction=reconstruction,
+        image_dir=image_dir,
+        marker_length_mm=marker_length_mm,
+        aruco_dict_id=aruco_dict_id,
+        detections=detections,
+        min_views=min_views,
+    )
+    return scale_factor, marker_points
 
 
 def recover_scale_safe(

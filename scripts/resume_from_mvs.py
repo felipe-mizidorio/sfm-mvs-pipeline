@@ -22,6 +22,7 @@ import yaml
 
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
 from sfm_mvs_pipeline.pipeline.orchestration import (
+    build_provenance,
     run_head_crop,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
@@ -30,8 +31,9 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
-    recover_scale_and_markers_safe,
+    recover_scale_details_safe,
 )
+from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -161,13 +163,16 @@ def main() -> None:
     # --- Step 3: Scale recovery (before the crop: the auto crop radius is
     # derived in millimetres and converted to SfM units via the scale) ---
     marker_length_mm = aruco_cfg.get("marker_length_mm")
-    scale_factor, marker_points = recover_scale_and_markers_safe(
+    scale_factor, marker_points, corners_by_marker = recover_scale_details_safe(
         reconstruction=reconstruction,
         image_dir=args.image_dir,
         marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
         aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
         detections=manifest_detections,
         min_views=int(aruco_cfg.get("min_views", 2)),
+    )
+    scale_sanity = check_marker_layout(
+        corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
     )
 
     # --- Step 4: Post-fusion spherical crop (on SOR-filtered cloud) ---
@@ -203,6 +208,11 @@ def main() -> None:
         lcc_stats,
         mesh_cfg["poisson_surface_reconstruction"],
         scale_factor,
+        scale_sanity=scale_sanity,
+        provenance=build_provenance(
+            args.frames_manifest,
+            {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+        ),
     )
 
     logger.info("Done. Outputs in '%s'", output_dir)

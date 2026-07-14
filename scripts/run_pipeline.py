@@ -13,6 +13,7 @@ from sfm_mvs_pipeline.evaluation.metrics import evaluate
 from sfm_mvs_pipeline.mvs.dense_reconstruction import run_dense_reconstruction
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
 from sfm_mvs_pipeline.pipeline.orchestration import (
+    build_provenance,
     run_head_crop,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
@@ -21,8 +22,9 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
-    recover_scale_and_markers_safe,
+    recover_scale_details_safe,
 )
+from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
 from sfm_mvs_pipeline.sfm.feature_extraction import extract_features
 from sfm_mvs_pipeline.sfm.feature_matching import match_features
 from sfm_mvs_pipeline.sfm.reconstruction import run_incremental_mapping
@@ -283,13 +285,16 @@ def main() -> None:
     # --- Metric scale recovery (before the crop: the auto crop radius is
     # derived in millimetres and converted to SfM units via the scale) ---
     marker_length_mm = aruco_cfg.get("marker_length_mm")
-    scale_factor, marker_points = recover_scale_and_markers_safe(
+    scale_factor, marker_points, corners_by_marker = recover_scale_details_safe(
         reconstruction=reconstructions[best_model_idx],
         image_dir=args.image_dir,
         marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
         aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
         detections=manifest_detections,
         min_views=int(aruco_cfg.get("min_views", 2)),
+    )
+    scale_sanity = check_marker_layout(
+        corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
     )
 
     # --- Step 5c/7: Spherical crop to head region (auto-sized from ArUco) ---
@@ -325,6 +330,11 @@ def main() -> None:
         lcc_stats,
         mesh_cfg["poisson_surface_reconstruction"],
         scale_factor,
+        scale_sanity=scale_sanity,
+        provenance=build_provenance(
+            args.frames_manifest,
+            {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+        ),
     )
 
     # --- Optional: Evaluation ---

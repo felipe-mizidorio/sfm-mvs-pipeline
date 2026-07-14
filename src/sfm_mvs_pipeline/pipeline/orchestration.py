@@ -6,10 +6,13 @@ inserting scale recovery in between (which is script-specific).
 """
 
 import datetime
+import hashlib
 import json
 import logging
+import platform
 from pathlib import Path
 
+import cv2
 import numpy as np
 import open3d as o3d
 import pycolmap
@@ -268,6 +271,47 @@ def run_poisson_lcc_and_visualize(
     return mesh, lcc_stats
 
 
+# Known sources of run-to-run output variation, recorded in every manifest so
+# a reader comparing two runs of the same input knows what may legitimately
+# differ (reproducibility requirement, plan task A2).
+NON_DETERMINISM_NOTES = [
+    "GPU PatchMatch stereo (dense reconstruction) is non-deterministic; "
+    "depth maps and fused point counts vary between runs.",
+    "Feature matching and incremental mapping are multi-threaded; "
+    "bundle-adjusted poses (and undistorted image sizes derived from them) "
+    "vary slightly between runs, as can sparse model selection.",
+    "Poisson reconstruction, SOR, cropping and scale recovery are "
+    "deterministic given identical inputs.",
+]
+
+
+def build_provenance(
+    frames_manifest: Path | None,
+    resolved_configs: dict,
+) -> dict:
+    """Reproducibility block for pipeline_manifest.json.
+
+    Records the library versions, the SHA-256 of the input frames manifest
+    (None when the run had no manifest), the fully-resolved config values the
+    run actually used, and the known non-determinism sources.
+    """
+    manifest_sha256 = None
+    if frames_manifest is not None and Path(frames_manifest).exists():
+        manifest_sha256 = hashlib.sha256(Path(frames_manifest).read_bytes()).hexdigest()
+    return {
+        "environment": {
+            "python": platform.python_version(),
+            "pycolmap": pycolmap.__version__,
+            "open3d": o3d.__version__,
+            "opencv": cv2.__version__,
+            "numpy": np.__version__,
+        },
+        "frames_manifest_sha256": manifest_sha256,
+        "resolved_configs": resolved_configs,
+        "non_determinism_notes": NON_DETERMINISM_NOTES,
+    }
+
+
 def write_pipeline_manifest(
     output_dir: Path,
     run_script: str,
@@ -275,6 +319,8 @@ def write_pipeline_manifest(
     lcc_stats: dict,
     mesh_opts: dict,
     scale_factor: float | None,
+    scale_sanity: dict | None = None,
+    provenance: dict | None = None,
 ) -> None:
     """Write pipeline_manifest.json to output_dir."""
     manifest = {
@@ -291,6 +337,10 @@ def write_pipeline_manifest(
         "scale_factor_mm_per_unit": scale_factor,
         **lcc_stats,
     }
+    if scale_sanity is not None:
+        manifest["scale_sanity_check"] = scale_sanity
+    if provenance is not None:
+        manifest.update(provenance)
     out = output_dir / "pipeline_manifest.json"
     out.write_text(json.dumps(manifest, indent=2))
     logger.info("Pipeline manifest written to '%s'", out)
