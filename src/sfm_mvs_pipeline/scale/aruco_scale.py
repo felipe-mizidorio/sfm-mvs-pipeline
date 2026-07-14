@@ -20,20 +20,18 @@ import pycolmap
 logger = logging.getLogger(__name__)
 
 
-def recover_scale(
+def triangulate_marker_corners(
     reconstruction: pycolmap.Reconstruction,
     image_dir: Path,
-    marker_length_mm: float,
     aruco_dict_id: int = cv2.aruco.DICT_4X4_50,
     detections: dict[str, list[dict]] | None = None,
     min_views: int = 2,
-) -> float:
-    """Return a scale factor (mm / reconstruction-unit) derived from ArUco markers.
+) -> dict[int, dict[int, np.ndarray]]:
+    """Triangulate ArUco marker corners into reconstruction (SfM-unit) space.
 
     Args:
         reconstruction: Completed sparse reconstruction from incremental mapping.
         image_dir: Directory containing the registered images (supports subdirs).
-        marker_length_mm: Physical side length of the ArUco square in millimetres.
         aruco_dict_id: OpenCV ArUco dictionary ID (default DICT_4X4_50).
         detections: Pre-computed detections from the preprocessing manifest.
             Format: {image_name: [{"id": int, "corners": [[x,y],…]×4}, …]}.
@@ -41,10 +39,9 @@ def recover_scale(
         min_views: Minimum number of views required to triangulate a marker corner.
 
     Returns:
-        Median scale factor across all triangulated markers.
-
-    Raises:
-        RuntimeError: If no markers can be triangulated from the reconstruction.
+        {marker_id: {corner_index: xyz}} with one mean 3D position per
+        successfully triangulated corner. Markers observed in fewer than
+        min_views images, or with no triangulable corner, are omitted.
     """
     aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_id)
     detector = cv2.aruco.ArucoDetector(aruco_dict, cv2.aruco.DetectorParameters())
@@ -88,7 +85,7 @@ def recover_scale(
         len(marker_obs),
     )
 
-    scale_estimates: list[float] = []
+    corners_by_marker: dict[int, dict[int, np.ndarray]] = {}
 
     for mid, obs in marker_obs.items():
         if len(obs) < min_views:
@@ -96,7 +93,7 @@ def recover_scale(
             continue
 
         # Triangulate each of the 4 corners from all observation pairs.
-        corners_3d: list[np.ndarray] = []  # one entry per successfully triangulated corner
+        corners_3d: dict[int, np.ndarray] = {}  # corner index → triangulated 3D point
         for corner_idx in range(4):
             pts_3d: list[np.ndarray] = []
             for i in range(len(obs)):
@@ -113,16 +110,47 @@ def recover_scale(
                     if p3d is not None:
                         pts_3d.append(p3d)
             if pts_3d:
-                corners_3d.append(np.mean(pts_3d, axis=0))
+                corners_3d[corner_idx] = np.mean(pts_3d, axis=0)
 
-        if len(corners_3d) < 2:
-            logger.debug("Marker %d: could not triangulate enough corners", mid)
+        if corners_3d:
+            corners_by_marker[mid] = corners_3d
+
+    return corners_by_marker
+
+
+def marker_corner_points(
+    corners_by_marker: dict[int, dict[int, np.ndarray]],
+) -> np.ndarray:
+    """Flatten triangulated corners into an (N, 3) array of SfM-unit points."""
+    pts = [p for corners in corners_by_marker.values() for p in corners.values()]
+    return np.array(pts) if pts else np.empty((0, 3))
+
+
+def _scale_from_marker_corners(
+    corners_by_marker: dict[int, dict[int, np.ndarray]],
+    marker_length_mm: float,
+) -> float:
+    """Median mm/SfM-unit factor across markers with a measurable side.
+
+    Raises:
+        RuntimeError: If no marker yields a usable side length.
+    """
+    scale_estimates: list[float] = []
+
+    for mid, corners_3d in corners_by_marker.items():
+        # Only adjacent corner pairs measure the marker side; (0,2) and (1,3)
+        # are diagonals (side × √2) and must not be used as the reference.
+        side_lengths = [
+            float(np.linalg.norm(corners_3d[a] - corners_3d[b]))
+            for a, b in ((0, 1), (1, 2), (2, 3), (3, 0))
+            if a in corners_3d and b in corners_3d
+        ]
+        side_lengths = [s for s in side_lengths if s > 1e-9]
+        if not side_lengths:
+            logger.debug("Marker %d: no adjacent corner pair triangulated", mid)
             continue
 
-        # Use side length (corner 0 → corner 1) as the reference distance.
-        side_3d = float(np.linalg.norm(corners_3d[0] - corners_3d[1]))
-        if side_3d < 1e-9:
-            continue
+        side_3d = float(np.median(side_lengths))
         scale = marker_length_mm / side_3d
         logger.debug("Marker %d: side_3d=%.6f → scale=%.4f mm/unit", mid, side_3d, scale)
         scale_estimates.append(scale)
@@ -139,6 +167,118 @@ def recover_scale(
         "Scale recovery: %d marker(s) used, scale=%.4f mm/unit (median)",
         len(scale_estimates),
         scale_factor,
+    )
+    return scale_factor
+
+
+def recover_scale(
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    marker_length_mm: float,
+    aruco_dict_id: int = cv2.aruco.DICT_4X4_50,
+    detections: dict[str, list[dict]] | None = None,
+    min_views: int = 2,
+) -> float:
+    """Return a scale factor (mm / reconstruction-unit) derived from ArUco markers.
+
+    See triangulate_marker_corners for argument semantics.
+
+    Returns:
+        Median scale factor across all triangulated markers.
+
+    Raises:
+        RuntimeError: If no markers can be triangulated from the reconstruction.
+    """
+    corners_by_marker = triangulate_marker_corners(
+        reconstruction=reconstruction,
+        image_dir=image_dir,
+        aruco_dict_id=aruco_dict_id,
+        detections=detections,
+        min_views=min_views,
+    )
+    return _scale_from_marker_corners(corners_by_marker, marker_length_mm)
+
+
+def recover_scale_details_safe(
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    marker_length_mm: float | None,
+    aruco_dict_id: int,
+    detections: dict[str, list[dict]] | None,
+    min_views: int,
+) -> tuple[float | None, np.ndarray | None, dict[int, dict[int, np.ndarray]] | None]:
+    """Recover scale, flattened corner points, and per-marker corners; never raises.
+
+    Returns (scale_factor, marker_points, corners_by_marker):
+    - marker_points is an (N, 3) array of triangulated ArUco corner positions
+      in SfM units — the input for automatic head-crop sizing.
+    - corners_by_marker is {marker_id: {corner_index: xyz}} — the input for
+      the independent layout-based scale sanity check.
+    All are None if marker_length_mm is falsy (scale recovery disabled) or if
+    recovery fails (logged as a warning): without a valid scale the marker
+    positions cannot size a metric crop.
+    """
+    if not marker_length_mm:
+        return None, None, None
+
+    logger.info("=== Scale recovery: detecting ArUco markers ===")
+    try:
+        corners_by_marker = triangulate_marker_corners(
+            reconstruction=reconstruction,
+            image_dir=image_dir,
+            aruco_dict_id=aruco_dict_id,
+            detections=detections,
+            min_views=min_views,
+        )
+        scale_factor = _scale_from_marker_corners(corners_by_marker, marker_length_mm)
+        logger.info("Scale factor: %.6f mm/unit", scale_factor)
+        return scale_factor, marker_corner_points(corners_by_marker), corners_by_marker
+    except RuntimeError as exc:
+        logger.warning("Scale recovery failed: %s — outputs remain in SfM units.", exc)
+        return None, None, None
+    except Exception:
+        logger.exception(
+            "Scale recovery crashed unexpectedly — outputs remain in SfM units."
+        )
+        return None, None, None
+
+
+def recover_scale_and_markers_safe(
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    marker_length_mm: float | None,
+    aruco_dict_id: int,
+    detections: dict[str, list[dict]] | None,
+    min_views: int,
+) -> tuple[float | None, np.ndarray | None]:
+    """recover_scale_details_safe for callers that don't need per-marker corners."""
+    scale_factor, marker_points, _ = recover_scale_details_safe(
+        reconstruction=reconstruction,
+        image_dir=image_dir,
+        marker_length_mm=marker_length_mm,
+        aruco_dict_id=aruco_dict_id,
+        detections=detections,
+        min_views=min_views,
+    )
+    return scale_factor, marker_points
+
+
+def recover_scale_safe(
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    marker_length_mm: float | None,
+    aruco_dict_id: int,
+    detections: dict[str, list[dict]] | None,
+    min_views: int,
+) -> float | None:
+    """recover_scale_and_markers_safe for callers that only need the factor."""
+    scale_factor, _ = recover_scale_and_markers_safe(
+        reconstruction=reconstruction,
+        image_dir=image_dir,
+        marker_length_mm=marker_length_mm,
+        aruco_dict_id=aruco_dict_id,
+        detections=detections,
+        min_views=min_views,
     )
     return scale_factor
 
@@ -182,8 +322,9 @@ def _projection_matrix(
     image = reconstruction.images[image_id]
     camera = reconstruction.cameras[image.camera_id]
     K = np.array(camera.calibration_matrix())
-    R = image.cam_from_world.rotation.matrix()
-    t = image.cam_from_world.translation.reshape(3, 1)
+    cfw = image.cam_from_world()
+    R = cfw.rotation.matrix()
+    t = cfw.translation.reshape(3, 1)
     return K @ np.hstack([R, t])
 
 

@@ -31,9 +31,11 @@ def fuse_depth_maps(
     fusion_options.max_reproj_error = options["max_reproj_error"]
 
     if bbox_min is not None and bbox_max is not None:
-        fusion_options.bounding_box = (
-            np.array(bbox_min, dtype=np.float64),
-            np.array(bbox_max, dtype=np.float64),
+        # pycolmap expects float32 arrays of shape (3, 1); pyright cannot prove
+        # the reshape produces that static shape.
+        fusion_options.bounding_box = (  # pyright: ignore[reportAttributeAccessIssue]
+            np.array(bbox_min, dtype=np.float32).reshape(3, 1),
+            np.array(bbox_max, dtype=np.float32).reshape(3, 1),
         )
         logger.info("Bounding box clipping: min=%s, max=%s", bbox_min, bbox_max)
 

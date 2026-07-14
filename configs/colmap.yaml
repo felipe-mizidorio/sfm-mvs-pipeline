@@ -5,12 +5,14 @@ feature_extraction:
   first_octave: -1
 
 feature_matching:
-  # Matching strategy: "exhaustive" for small datasets, "vocab_tree" for large ones
-  method: exhaustive
+  # Matching strategy: "exhaustive" | "sequential" | "vocab_tree"
+  # Use "sequential" for video captures (O(N) vs exhaustive O(N²))
+  method: sequential
+  sequential:
+    # How many subsequent frames to match against each frame
+    overlap: 5
   vocab_tree:
-    # Path to pre-built vocabulary tree file (required when method is vocab_tree)
     vocab_tree_path: ""
-    # Number of nearest-neighbor images to match per query image
     num_nearest_neighbors: 100
 
 incremental_mapping:

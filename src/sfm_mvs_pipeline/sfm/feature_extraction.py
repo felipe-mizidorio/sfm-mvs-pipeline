@@ -16,6 +16,7 @@ def extract_features(
     camera_model: str | None = None,
     camera_params: str | None = None,
     image_names: list[str] | None = None,
+    mask_path: Path | None = None,
 ) -> None:
     if not image_dir.exists():
         raise ValueError(f"image_dir does not exist: {image_dir}")
@@ -42,6 +43,9 @@ def extract_features(
         reader_options.camera_model = camera_model
     if camera_params is not None:
         reader_options.camera_params = camera_params
+    if mask_path is not None:
+        reader_options.mask_path = mask_path
+        logger.info("Using mask directory: '%s'", mask_path)
     camera_mode = (
         pycolmap.CameraMode.SINGLE if camera_model is not None else pycolmap.CameraMode.AUTO
     )

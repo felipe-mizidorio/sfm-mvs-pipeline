@@ -17,6 +17,7 @@ _FUSION_OPTIONS = {
 }
 
 
+@patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.has_cuda", True)
 @patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.patch_match_stereo")
 @patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.PatchMatchOptions")
 @patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.undistort_images")

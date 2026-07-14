@@ -64,13 +64,13 @@ cd sfm-mvs-pipeline
 Install core dependencies (CPU, e.g. development machine without GPU):
 
 ```bash
-poetry install
+uv sync
 ```
 
 Install with GPU support (NVIDIA GPU + CUDA 12):
 
 ```bash
-poetry install --with gpu
+uv sync --group gpu
 ```
 
 > **Note:** The `gpu` group replaces the CPU-only `pycolmap` with `pycolmap-cuda12`, which enables GPU-accelerated feature extraction, matching, and MVS. The CUDA Toolkit must be installed separately on Linux.
@@ -78,13 +78,13 @@ poetry install --with gpu
 Install dev tools (linting, type checking, tests):
 
 ```bash
-poetry install --with dev
+uv sync --group dev
 ```
 
 Install notebook dependencies:
 
 ```bash
-poetry install --with notebook
+uv sync --group notebook
 ```
 
 ---
@@ -92,7 +92,7 @@ poetry install --with notebook
 ## Running the Pipeline
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene
 ```
@@ -126,6 +126,14 @@ poetry run python scripts/run_pipeline.py \
 |---|---|---|
 | `--frames-manifest` | `None` | Path to a JSON manifest from the ArUco preprocessing stage. Keys: `"frames"` (list of filenames to use) and optionally `"marker_detections"` (`{frame: [{id, corners}]}`) to skip re-detection during scale recovery. |
 
+#### Head crop
+
+The dense cloud is automatically cropped to a sphere around the head before meshing: the centre comes from the intersection of camera optical axes, and the radius is derived from the triangulated ArUco marker positions plus a neonatal-anatomy margin (no user input needed — designed for at-home captures with arbitrary backgrounds). Requires `marker_length_mm` in `configs/aruco.yaml`; without a recovered scale the crop falls back to a fixed 1.5 SfM-unit radius.
+
+| Argument | Default | Description |
+|---|---|---|
+| `--head-radius` | `None` (auto) | **Debug-only** override of the crop radius, in SfM units. `0` disables the crop. Not needed in normal use. |
+
 #### Fusion clipping
 
 | Argument | Default | Description |
@@ -136,7 +144,7 @@ poetry run python scripts/run_pipeline.py \
 ### Example: sparse-only run on CPU
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene \
   --device cpu \
@@ -146,7 +154,7 @@ poetry run python scripts/run_pipeline.py \
 ### Example: full run with evaluation
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene \
   --ground-truth data/raw/my_scene_gt.ply
@@ -155,7 +163,7 @@ poetry run python scripts/run_pipeline.py \
 ### Example: neonatal capture with known intrinsics and metric scale
 
 ```bash
-poetry run python scripts/run_pipeline.py \
+uv run python scripts/run_pipeline.py \
   --image-dir data/raw/session_01/frames \
   --output-dir data/processed/session_01 \
   --camera-model OPENCV \
@@ -250,14 +258,14 @@ All pipeline parameters are controlled by YAML files in `configs/`.
 ### Linting and type checking
 
 ```bash
-poetry run ruff check src/
-poetry run pyright src/
+uv run ruff check src/
+uv run pyright src/
 ```
 
 ### Tests
 
 ```bash
-poetry run pytest
+uv run pytest
 ```
 
 ### Notebooks
@@ -265,5 +273,5 @@ poetry run pytest
 Launch JupyterLab after installing the `notebook` group:
 
 ```bash
-poetry run jupyter lab
+uv run jupyter lab
 ```

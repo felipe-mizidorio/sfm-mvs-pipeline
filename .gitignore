@@ -221,3 +221,8 @@ __marimo__/
 
 # Data Folder
 data/
+
+# Claude / superpowers
+CLAUDE.md
+docs/superpowers/
+.claude/
