@@ -85,16 +85,16 @@ def main() -> None:
         detections=manifest_detections,
         min_views=int(aruco_cfg.get("min_views", 2)),
     )
-    if scale_factor is not None:
-        apply_scale_to_ply(dense_filtered_ply, scale_factor)
-
     # Poisson + LCC + visualization.
     logger.info("=== Poisson surface reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
         dense_filtered_ply, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
     )
 
+    # Scale is applied once per file, after meshing: scaling dense_filtered_ply
+    # before Poisson would double-scale the mesh derived from it.
     if scale_factor is not None:
+        apply_scale_to_ply(dense_filtered_ply, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
 
     write_pipeline_manifest(

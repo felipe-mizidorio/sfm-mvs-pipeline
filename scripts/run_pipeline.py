@@ -13,6 +13,7 @@ from sfm_mvs_pipeline.evaluation.metrics import evaluate
 from sfm_mvs_pipeline.mvs.dense_reconstruction import run_dense_reconstruction
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
 from sfm_mvs_pipeline.pipeline.orchestration import (
+    run_head_crop,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
     write_pipeline_manifest,
@@ -20,7 +21,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
-    recover_scale_safe,
+    recover_scale_and_markers_safe,
 )
 from sfm_mvs_pipeline.sfm.feature_extraction import extract_features
 from sfm_mvs_pipeline.sfm.feature_matching import match_features
@@ -128,6 +129,15 @@ def _parse_args() -> argparse.Namespace:
             '"marker_detections" ({frame: [{id, corners}]}) for scale recovery.'
         ),
     )
+    # --- Head crop (debug override only) ---
+    parser.add_argument(
+        "--head-radius",
+        type=float,
+        default=None,
+        help="DEBUG override for the spherical head-crop radius, in SfM units. "
+        "Not needed in normal use: the radius is auto-derived from the "
+        "triangulated ArUco markers and marker_length_mm. 0 disables the crop.",
+    )
     # --- Bounding-box clipping (G4) ---
     parser.add_argument(
         "--bbox-min",
@@ -187,8 +197,15 @@ def main() -> None:
             len(manifest_detections or {}),
         )
         if manifest_data.get("mask_dir"):
-            mask_path = args.image_dir / manifest_data["mask_dir"]
-            logger.info("Using mask directory: '%s'", mask_path)
+            candidate_mask_path = Path(args.image_dir) / manifest_data["mask_dir"]
+            if candidate_mask_path.is_dir():
+                mask_path = candidate_mask_path
+                logger.info("Using mask directory: '%s'", mask_path)
+            else:
+                logger.warning(
+                    "Manifest mask_dir '%s' does not exist — ignoring masks.",
+                    candidate_mask_path,
+                )
 
     # --- Step 1/7: Feature extraction ---
     logger.info("=== Step 1/7: Feature extraction ===")
@@ -263,9 +280,10 @@ def main() -> None:
     logger.info("=== Step 5b/7: Point cloud filtering (SOR) ===")
     dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
 
-    # --- Metric scale recovery ---
+    # --- Metric scale recovery (before the crop: the auto crop radius is
+    # derived in millimetres and converted to SfM units via the scale) ---
     marker_length_mm = aruco_cfg.get("marker_length_mm")
-    scale_factor = recover_scale_safe(
+    scale_factor, marker_points = recover_scale_and_markers_safe(
         reconstruction=reconstructions[best_model_idx],
         image_dir=args.image_dir,
         marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
@@ -273,16 +291,30 @@ def main() -> None:
         detections=manifest_detections,
         min_views=int(aruco_cfg.get("min_views", 2)),
     )
-    if scale_factor is not None:
-        apply_scale_to_ply(dense_filtered_ply, scale_factor)
+
+    # --- Step 5c/7: Spherical crop to head region (auto-sized from ArUco) ---
+    input_for_poisson, crop_stats = run_head_crop(
+        dense_filtered_ply,
+        output_dir,
+        reconstructions[best_model_idx],
+        head_radius_override=args.head_radius,
+        scale_factor=scale_factor,
+        marker_points=marker_points,
+    )
+    sor_stats.update(crop_stats)
 
     # --- Step 6/7: Poisson reconstruction + LCC + visualization ---
     logger.info("=== Step 6/7: Surface (Poisson) reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
-        dense_filtered_ply, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
+        input_for_poisson, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
     )
 
+    # Scale is applied once per file, after meshing: scaling dense_filtered_ply
+    # before Poisson would double-scale the mesh derived from it.
     if scale_factor is not None:
+        apply_scale_to_ply(dense_filtered_ply, scale_factor)
+        if input_for_poisson != dense_filtered_ply:
+            apply_scale_to_ply(input_for_poisson, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
 
     # --- Step 7/7: Pipeline manifest ---

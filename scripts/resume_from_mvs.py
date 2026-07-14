@@ -1,13 +1,14 @@
 """Re-run stereo fusion (optionally with bbox), SOR, crop to head region,
 then scale recovery and Poisson + LCC mesh.
 
-Typical usage (no bbox — full fusion, post-fusion SOR + spatial crop):
+Typical usage (no bbox — full fusion, SOR + automatic ArUco-derived head crop):
     uv run python scripts/resume_from_mvs.py \\
         --output-dir data/processed/<session> \\
         --image-dir path/to/filtered/frames \\
-        --frames-manifest path/to/manifest.json \\
-        --head-radius 1.5
+        --frames-manifest path/to/manifest.json
 
+The head-crop radius is derived automatically from the triangulated ArUco
+markers; --head-radius is a debug-only override (0 disables the crop).
 Optionally add --bbox-min / --bbox-max to also clip at the fusion step.
 """
 
@@ -17,13 +18,11 @@ import logging
 import sys
 from pathlib import Path
 
-import numpy as np
-import open3d as o3d
-import pycolmap
 import yaml
 
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
 from sfm_mvs_pipeline.pipeline.orchestration import (
+    run_head_crop,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
     write_pipeline_manifest,
@@ -31,7 +30,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
-    recover_scale_safe,
+    recover_scale_and_markers_safe,
 )
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
@@ -45,39 +44,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _estimate_head_center(reconstruction: pycolmap.Reconstruction) -> np.ndarray:
-    """Least-squares intersection of camera optical axes → approximate head center."""
-    A = np.zeros((3, 3))
-    b = np.zeros(3)
-    for img in reconstruction.images.values():
-        if not img.has_pose:
-            continue
-        cfw = img.cam_from_world()
-        R = cfw.rotation.matrix()
-        t = cfw.translation
-        C = -R.T @ t
-        d = R[2]
-        d /= np.linalg.norm(d)
-        M = np.eye(3) - np.outer(d, d)
-        A += M
-        b += M @ C
-    return np.linalg.solve(A, b)
+def _guard_against_double_scale(output_dir: Path) -> None:
+    """Refuse --skip-fusion when a previous resume run already scaled dense.ply.
 
-
-def _crop_to_sphere(
-    pcd: o3d.geometry.PointCloud, center: np.ndarray, radius: float
-) -> o3d.geometry.PointCloud:
-    pts = np.asarray(pcd.points)
-    dists = np.linalg.norm(pts - center, axis=1)
-    mask = dists <= radius
-    logger.info(
-        "Spherical crop: keeping %d / %d points within radius %.4f SfM units of center %s",
-        mask.sum(),
-        len(pts),
-        radius,
-        np.round(center, 4),
-    )
-    return pcd.select_by_index(np.where(mask)[0])
+    resume_from_mvs.py scales dense.ply in place after meshing. Re-running with
+    --skip-fusion would re-derive the scale from the (unscaled) sparse model and
+    apply it again to the already-scaled cloud — silently producing geometry
+    scale² times too large. Fail loudly instead.
+    """
+    prev_manifest_path = output_dir / "pipeline_manifest.json"
+    if not prev_manifest_path.exists():
+        return
+    prev = json.loads(prev_manifest_path.read_text())
+    if prev.get("run_script") == "resume_from_mvs.py" and prev.get(
+        "scale_factor_mm_per_unit"
+    ):
+        logger.error(
+            "dense.ply in '%s' was already scaled to millimetres by a previous "
+            "resume_from_mvs.py run (scale %.6f mm/unit, see pipeline_manifest.json). "
+            "Running with --skip-fusion would double-scale it. Re-run without "
+            "--skip-fusion to regenerate dense.ply from mvs/, or delete "
+            "pipeline_manifest.json if dense.ply was replaced manually.",
+            output_dir,
+            prev["scale_factor_mm_per_unit"],
+        )
+        sys.exit(1)
 
 
 def main() -> None:
@@ -109,9 +100,10 @@ def main() -> None:
     parser.add_argument(
         "--head-radius",
         type=float,
-        default=1.5,
-        help="Post-fusion spherical crop radius in SfM units (default 1.5 ≈ 230 mm). "
-        "0 = no crop.",
+        default=None,
+        help="DEBUG override for the spherical head-crop radius, in SfM units. "
+        "Not needed in normal use: the radius is auto-derived from the "
+        "triangulated ArUco markers and marker_length_mm. 0 disables the crop.",
     )
     parser.add_argument(
         "--skip-fusion",
@@ -133,7 +125,9 @@ def main() -> None:
     sparse_dir = output_dir / "sparse"
     dense_ply = output_dir / "dense.ply"
     mesh_ply = output_dir / "mesh.ply"
-    cropped_ply = output_dir / "dense_filtered_cropped.ply"
+
+    if args.skip_fusion:
+        _guard_against_double_scale(output_dir)
 
     manifest_detections = None
     if args.frames_manifest is not None:
@@ -164,32 +158,10 @@ def main() -> None:
     logger.info("=== Point cloud filtering (SOR) ===")
     dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
 
-    # --- Step 3: Post-fusion spherical crop (on SOR-filtered cloud) ---
-    input_for_poisson = dense_filtered_ply
-    if args.head_radius > 0:
-        logger.info("=== Post-fusion spherical crop (radius=%.3f SfM units) ===", args.head_radius)
-        head_center = _estimate_head_center(reconstruction)
-        logger.info("Head center (SfM): %s", np.round(head_center, 4))
-        pcd = o3d.io.read_point_cloud(str(dense_filtered_ply))
-        logger.info("Dense filtered cloud before crop: %d points", len(pcd.points))
-        pcd_crop = _crop_to_sphere(pcd, head_center, args.head_radius)
-        if len(pcd_crop.points) == 0:
-            logger.warning(
-                "Crop removed all points! Falling back to SOR-filtered dense cloud. "
-                "Try increasing --head-radius."
-            )
-            pcd_crop = pcd
-        o3d.io.write_point_cloud(str(cropped_ply), pcd_crop)
-        logger.info(
-            "Cropped dense cloud: %d points, saved to '%s'",
-            len(pcd_crop.points),
-            cropped_ply,
-        )
-        input_for_poisson = cropped_ply
-
-    # --- Step 4: Scale recovery ---
+    # --- Step 3: Scale recovery (before the crop: the auto crop radius is
+    # derived in millimetres and converted to SfM units via the scale) ---
     marker_length_mm = aruco_cfg.get("marker_length_mm")
-    scale_factor = recover_scale_safe(
+    scale_factor, marker_points = recover_scale_and_markers_safe(
         reconstruction=reconstruction,
         image_dir=args.image_dir,
         marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
@@ -197,6 +169,17 @@ def main() -> None:
         detections=manifest_detections,
         min_views=int(aruco_cfg.get("min_views", 2)),
     )
+
+    # --- Step 4: Post-fusion spherical crop (on SOR-filtered cloud) ---
+    input_for_poisson, crop_stats = run_head_crop(
+        dense_filtered_ply,
+        output_dir,
+        reconstruction,
+        head_radius_override=args.head_radius,
+        scale_factor=scale_factor,
+        marker_points=marker_points,
+    )
+    sor_stats.update(crop_stats)
 
     # --- Step 5: Poisson + LCC + visualization ---
     logger.info("=== Poisson surface reconstruction + LCC ===")
@@ -208,8 +191,8 @@ def main() -> None:
     if scale_factor is not None:
         apply_scale_to_ply(dense_ply, scale_factor)
         apply_scale_to_ply(dense_filtered_ply, scale_factor)
-        if input_for_poisson == cropped_ply:
-            apply_scale_to_ply(cropped_ply, scale_factor)
+        if input_for_poisson != dense_filtered_ply:
+            apply_scale_to_ply(input_for_poisson, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
         logger.info("Applied scale %.6f mm/unit to outputs.", scale_factor)
 

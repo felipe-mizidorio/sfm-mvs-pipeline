@@ -10,13 +10,180 @@ import json
 import logging
 from pathlib import Path
 
+import numpy as np
 import open3d as o3d
+import pycolmap
 
 from sfm_mvs_pipeline.mesh.surface_reconstruction import _apply_lcc, _apply_taubin, _run_poisson
 from sfm_mvs_pipeline.postprocess.point_cloud_filter import filter_point_cloud
 from sfm_mvs_pipeline.visualization.plotly_viz import save_mesh_html, save_point_cloud_html
 
 logger = logging.getLogger(__name__)
+
+# --- Automatic head-crop sizing -------------------------------------------
+# Domestic-use constraint: the parent films at home and never tunes crop
+# parameters, so the radius is derived from what capture already provides —
+# ArUco corner positions (SfM units) and the recovered mm/unit scale.
+# Anatomy: a term neonate's occipitofrontal circumference is ~33–37 cm
+# (head diameter ~105–118 mm). Markers sit on a cap on the crown, so the
+# crop must reach from the marker cloud past the chin/occiput.
+HEAD_CROP_MARGIN_MM = 100.0
+# Never crop tighter than a full neonatal head around the centre.
+HEAD_CROP_MIN_RADIUS_MM = 140.0
+# Cap against wild marker triangulations: beyond this the crop stops
+# excluding background and the radius estimate itself is suspect.
+HEAD_CROP_MAX_RADIUS_MM = 250.0
+# Legacy fallback (SfM units, ≈230 mm at typical capture scale) used when
+# scale or marker positions are unavailable.
+DEFAULT_HEAD_RADIUS_SFM = 1.5
+
+
+def estimate_head_center(reconstruction: pycolmap.Reconstruction) -> np.ndarray:
+    """Least-squares intersection of camera optical axes → approximate head center.
+
+    Raises:
+        np.linalg.LinAlgError: If poses do not constrain a unique intersection
+            (e.g. no posed images, or all optical axes parallel).
+    """
+    A = np.zeros((3, 3))
+    b = np.zeros(3)
+    for img in reconstruction.images.values():
+        if not img.has_pose:
+            continue
+        cfw = img.cam_from_world()
+        R = cfw.rotation.matrix()
+        t = cfw.translation
+        C = -R.T @ t
+        d = R[2]
+        d /= np.linalg.norm(d)
+        M = np.eye(3) - np.outer(d, d)
+        A += M
+        b += M @ C
+    return np.linalg.solve(A, b)
+
+
+def crop_to_sphere(
+    pcd: o3d.geometry.PointCloud, center: np.ndarray, radius: float
+) -> o3d.geometry.PointCloud:
+    pts = np.asarray(pcd.points)
+    dists = np.linalg.norm(pts - center, axis=1)
+    mask = dists <= radius
+    logger.info(
+        "Spherical crop: keeping %d / %d points within radius %.4f SfM units of center %s",
+        mask.sum(),
+        len(pts),
+        radius,
+        np.round(center, 4),
+    )
+    return pcd.select_by_index(np.where(mask)[0])
+
+
+def auto_head_radius(
+    center: np.ndarray,
+    marker_points: np.ndarray | None,
+    scale_factor: float | None,
+) -> float | None:
+    """Head-crop radius (SfM units) derived from triangulated ArUco corners.
+
+    Median marker-corner distance from the crop centre (robust to a few bad
+    triangulations) plus HEAD_CROP_MARGIN_MM, clamped to
+    [HEAD_CROP_MIN_RADIUS_MM, HEAD_CROP_MAX_RADIUS_MM]. Returns None when the
+    scale factor or marker positions are unavailable — callers fall back to
+    DEFAULT_HEAD_RADIUS_SFM.
+    """
+    if scale_factor is None or marker_points is None or len(marker_points) == 0:
+        return None
+    dists = np.linalg.norm(np.asarray(marker_points) - np.asarray(center), axis=1)
+    radius = float(np.median(dists)) + HEAD_CROP_MARGIN_MM / scale_factor
+    radius = max(radius, HEAD_CROP_MIN_RADIUS_MM / scale_factor)
+    radius = min(radius, HEAD_CROP_MAX_RADIUS_MM / scale_factor)
+    logger.info(
+        "Auto head-crop radius: %.4f SfM units (%.1f mm) from %d marker corner(s)",
+        radius,
+        radius * scale_factor,
+        len(marker_points),
+    )
+    return radius
+
+
+def run_head_crop(
+    dense_filtered_ply: Path,
+    output_dir: Path,
+    reconstruction: pycolmap.Reconstruction,
+    head_radius_override: float | None,
+    scale_factor: float | None,
+    marker_points: np.ndarray | None,
+) -> tuple[Path, dict]:
+    """Spherical crop of the SOR-filtered cloud to the head region.
+
+    Radius selection: explicit override (debug) > auto-derived from ArUco
+    markers > DEFAULT_HEAD_RADIUS_SFM fallback. An override of 0 (or negative)
+    disables the crop entirely.
+
+    Returns:
+        (input_for_poisson, crop_stats): the PLY the mesh stage should consume
+        (the cropped file, or dense_filtered_ply when the crop is skipped or
+        removes every point) and stats for pipeline_manifest.json.
+    """
+    if head_radius_override is not None and head_radius_override <= 0:
+        logger.info("Head crop disabled (--head-radius %s).", head_radius_override)
+        return dense_filtered_ply, {}
+
+    try:
+        head_center = estimate_head_center(reconstruction)
+    except np.linalg.LinAlgError:
+        logger.warning(
+            "Could not estimate head centre from camera poses — skipping head crop."
+        )
+        return dense_filtered_ply, {}
+    logger.info("Head center (SfM): %s", np.round(head_center, 4))
+
+    if head_radius_override is not None:
+        radius, radius_source = float(head_radius_override), "override"
+    else:
+        auto_radius = auto_head_radius(head_center, marker_points, scale_factor)
+        if auto_radius is None:
+            logger.warning(
+                "No usable ArUco scale/markers for auto crop radius — "
+                "falling back to %.2f SfM units.",
+                DEFAULT_HEAD_RADIUS_SFM,
+            )
+            radius, radius_source = DEFAULT_HEAD_RADIUS_SFM, "default_fallback"
+        else:
+            radius, radius_source = auto_radius, "aruco_auto"
+
+    logger.info(
+        "=== Post-fusion spherical crop (radius=%.3f SfM units, %s) ===",
+        radius,
+        radius_source,
+    )
+    pcd = o3d.io.read_point_cloud(str(dense_filtered_ply))
+    logger.info("Dense filtered cloud before crop: %d points", len(pcd.points))
+    pcd_crop = crop_to_sphere(pcd, head_center, radius)
+
+    if len(pcd_crop.points) == 0:
+        logger.warning(
+            "Crop removed all points! Falling back to SOR-filtered dense cloud. "
+            "Check camera poses / marker triangulation, or override --head-radius."
+        )
+        return dense_filtered_ply, {}
+
+    cropped_ply = output_dir / "dense_filtered_cropped.ply"
+    o3d.io.write_point_cloud(str(cropped_ply), pcd_crop)
+    logger.info(
+        "Cropped dense cloud: %d points, saved to '%s'", len(pcd_crop.points), cropped_ply
+    )
+
+    crop_stats = {
+        "head_crop": {
+            "radius_sfm_units": radius,
+            "radius_source": radius_source,
+            "center_sfm": [float(c) for c in head_center],
+            "points_before": len(pcd.points),
+            "points_after": len(pcd_crop.points),
+        }
+    }
+    return cropped_ply, crop_stats
 
 
 def run_sor_and_visualize(

@@ -126,6 +126,14 @@ uv run python scripts/run_pipeline.py \
 |---|---|---|
 | `--frames-manifest` | `None` | Path to a JSON manifest from the ArUco preprocessing stage. Keys: `"frames"` (list of filenames to use) and optionally `"marker_detections"` (`{frame: [{id, corners}]}`) to skip re-detection during scale recovery. |
 
+#### Head crop
+
+The dense cloud is automatically cropped to a sphere around the head before meshing: the centre comes from the intersection of camera optical axes, and the radius is derived from the triangulated ArUco marker positions plus a neonatal-anatomy margin (no user input needed — designed for at-home captures with arbitrary backgrounds). Requires `marker_length_mm` in `configs/aruco.yaml`; without a recovered scale the crop falls back to a fixed 1.5 SfM-unit radius.
+
+| Argument | Default | Description |
+|---|---|---|
+| `--head-radius` | `None` (auto) | **Debug-only** override of the crop radius, in SfM units. `0` disables the crop. Not needed in normal use. |
+
 #### Fusion clipping
 
 | Argument | Default | Description |
