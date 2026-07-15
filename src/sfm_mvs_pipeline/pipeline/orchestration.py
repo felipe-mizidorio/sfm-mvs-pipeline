@@ -39,6 +39,16 @@ HEAD_CROP_MAX_RADIUS_MM = 250.0
 # Legacy fallback (SfM units, ≈230 mm at typical capture scale) used when
 # scale or marker positions are unavailable.
 DEFAULT_HEAD_RADIUS_SFM = 1.5
+# Minimum triangulated ArUco corners for the corner centroid to be trusted as
+# the crop centre. One marker (4 corners) has no redundancy: a single bad
+# triangulation drags the centroid arbitrarily far with nothing to counter it,
+# and 4 coplanar corners sit ON the scalp shell rather than sampling its
+# curvature. Two markers (8 corners) is the minimum at which corners
+# cross-check each other and the centroid starts pulling toward the cranial
+# interior. Even a poor domestic capture that recovered scale at all
+# triangulates several of the cap's ~19 markers, so 8 is conservative for
+# real captures while still catching the degenerate single-marker case.
+HEAD_CROP_MIN_MARKER_CORNERS = 8
 
 
 def estimate_head_center(reconstruction: pycolmap.Reconstruction) -> np.ndarray:
@@ -85,7 +95,7 @@ def auto_head_radius(
     center: np.ndarray,
     marker_points: np.ndarray | None,
     scale_factor: float | None,
-) -> float | None:
+) -> tuple[float, dict] | None:
     """Head-crop radius (SfM units) derived from triangulated ArUco corners.
 
     Median marker-corner distance from the crop centre (robust to a few bad
@@ -93,20 +103,44 @@ def auto_head_radius(
     [HEAD_CROP_MIN_RADIUS_MM, HEAD_CROP_MAX_RADIUS_MM]. Returns None when the
     scale factor or marker positions are unavailable — callers fall back to
     DEFAULT_HEAD_RADIUS_SFM.
+
+    Returns:
+        (radius, clamp_info) where clamp_info records whether the clamp fired
+        ("min" | "max" | False) and the pre-clamp value in millimetres. With a
+        well-placed centre the clamp should never fire, so tripping it is a
+        sentinel for an upstream problem (bad triangulations or wrong scale).
     """
     if scale_factor is None or marker_points is None or len(marker_points) == 0:
         return None
     dists = np.linalg.norm(np.asarray(marker_points) - np.asarray(center), axis=1)
-    radius = float(np.median(dists)) + HEAD_CROP_MARGIN_MM / scale_factor
-    radius = max(radius, HEAD_CROP_MIN_RADIUS_MM / scale_factor)
+    unclamped = float(np.median(dists)) + HEAD_CROP_MARGIN_MM / scale_factor
+    radius = max(unclamped, HEAD_CROP_MIN_RADIUS_MM / scale_factor)
     radius = min(radius, HEAD_CROP_MAX_RADIUS_MM / scale_factor)
+    clamped: str | bool = False
+    if radius > unclamped:
+        clamped = "min"
+    elif radius < unclamped:
+        clamped = "max"
+    if clamped:
+        logger.warning(
+            "Auto head-crop radius clamped to %s bound: computed %.1f mm from "
+            "markers, using %.1f mm. A correct centre should not hit the clamp "
+            "— check marker triangulations and metric scale.",
+            clamped,
+            unclamped * scale_factor,
+            radius * scale_factor,
+        )
+    clamp_info = {
+        "radius_clamped": clamped,
+        "radius_unclamped_mm": unclamped * scale_factor,
+    }
     logger.info(
         "Auto head-crop radius: %.4f SfM units (%.1f mm) from %d marker corner(s)",
         radius,
         radius * scale_factor,
         len(marker_points),
     )
-    return radius
+    return radius, clamp_info
 
 
 def run_head_crop(
@@ -118,6 +152,14 @@ def run_head_crop(
     marker_points: np.ndarray | None,
 ) -> tuple[Path, dict]:
     """Spherical crop of the SOR-filtered cloud to the head region.
+
+    Centre selection: centroid of the triangulated ArUco corners when at least
+    HEAD_CROP_MIN_MARKER_CORNERS are available, else the least-squares
+    optical-axis intersection. On a one-sided capture arc the optical-axis
+    point converges on the most-observed region (face/sides), not the cranial
+    centre; the corner centroid sits on the cap's curved shell and is
+    intrinsically biased toward the cranial interior, with no anatomical
+    constant needed.
 
     Radius selection: explicit override (debug) > auto-derived from ArUco
     markers > DEFAULT_HEAD_RADIUS_SFM fallback. An override of 0 (or negative)
@@ -132,20 +174,35 @@ def run_head_crop(
         logger.info("Head crop disabled (--head-radius %s).", head_radius_override)
         return dense_filtered_ply, {}
 
-    try:
-        head_center = estimate_head_center(reconstruction)
-    except np.linalg.LinAlgError:
-        logger.warning(
-            "Could not estimate head centre from camera poses — skipping head crop."
+    if marker_points is not None and len(marker_points) >= HEAD_CROP_MIN_MARKER_CORNERS:
+        head_center = np.asarray(marker_points).mean(axis=0)
+        center_source = "aruco_centroid"
+        logger.info(
+            "Head centre from ArUco corner centroid (%d corners).", len(marker_points)
         )
-        return dense_filtered_ply, {}
-    logger.info("Head center (SfM): %s", np.round(head_center, 4))
+    else:
+        try:
+            head_center = estimate_head_center(reconstruction)
+        except np.linalg.LinAlgError:
+            logger.warning(
+                "Could not estimate head centre from camera poses — skipping head crop."
+            )
+            return dense_filtered_ply, {}
+        center_source = "optical_axis_fallback"
+        logger.warning(
+            "Only %d triangulated ArUco corner(s) (< %d) — falling back to the "
+            "optical-axis head centre, which is biased on one-sided captures.",
+            0 if marker_points is None else len(marker_points),
+            HEAD_CROP_MIN_MARKER_CORNERS,
+        )
+    logger.info("Head center (SfM, %s): %s", center_source, np.round(head_center, 4))
 
+    clamp_info: dict = {}
     if head_radius_override is not None:
         radius, radius_source = float(head_radius_override), "override"
     else:
-        auto_radius = auto_head_radius(head_center, marker_points, scale_factor)
-        if auto_radius is None:
+        auto_result = auto_head_radius(head_center, marker_points, scale_factor)
+        if auto_result is None:
             logger.warning(
                 "No usable ArUco scale/markers for auto crop radius — "
                 "falling back to %.2f SfM units.",
@@ -153,7 +210,7 @@ def run_head_crop(
             )
             radius, radius_source = DEFAULT_HEAD_RADIUS_SFM, "default_fallback"
         else:
-            radius, radius_source = auto_radius, "aruco_auto"
+            (radius, clamp_info), radius_source = auto_result, "aruco_auto"
 
     logger.info(
         "=== Post-fusion spherical crop (radius=%.3f SfM units, %s) ===",
@@ -181,7 +238,9 @@ def run_head_crop(
         "head_crop": {
             "radius_sfm_units": radius,
             "radius_source": radius_source,
+            **clamp_info,
             "center_sfm": [float(c) for c in head_center],
+            "center_source": center_source,
             "points_before": len(pcd.points),
             "points_after": len(pcd_crop.points),
         }

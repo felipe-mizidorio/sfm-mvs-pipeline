@@ -26,6 +26,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
     DEFAULT_HEAD_RADIUS_SFM,
     HEAD_CROP_MARGIN_MM,
     HEAD_CROP_MAX_RADIUS_MM,
+    HEAD_CROP_MIN_MARKER_CORNERS,
     HEAD_CROP_MIN_RADIUS_MM,
     auto_head_radius,
     crop_to_sphere,
@@ -178,7 +179,7 @@ def _write_cloud(points: np.ndarray, path: Path) -> None:
 def test_auto_head_radius_from_markers():
     rng = np.random.default_rng(0)
     markers = _make_marker_corner_points(rng)
-    radius = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
+    radius, clamp_info = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
     # median corner distance (~0.65 units, corners stick out tangentially)
     # + 100 mm margin, within clamps.
     expected = float(
@@ -187,18 +188,31 @@ def test_auto_head_radius_from_markers():
     assert radius == pytest.approx(expected, rel=1e-6)
     assert HEAD_CROP_MIN_RADIUS_MM / SCALE_MM_PER_UNIT <= radius
     assert radius <= HEAD_CROP_MAX_RADIUS_MM / SCALE_MM_PER_UNIT
+    assert clamp_info["radius_clamped"] is False
+    assert clamp_info["radius_unclamped_mm"] == pytest.approx(
+        expected * SCALE_MM_PER_UNIT, rel=1e-6
+    )
 
 
 def test_auto_head_radius_min_clamp():
     markers = np.tile(np.array([[0.05, 0.0, 0.0]]), (8, 1))
-    radius = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
+    radius, clamp_info = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
     assert radius == pytest.approx(HEAD_CROP_MIN_RADIUS_MM / SCALE_MM_PER_UNIT)
+    assert clamp_info["radius_clamped"] == "min"
+    # offending (pre-clamp) value: 5 mm median distance + 100 mm margin
+    assert clamp_info["radius_unclamped_mm"] == pytest.approx(
+        0.05 * SCALE_MM_PER_UNIT + HEAD_CROP_MARGIN_MM
+    )
 
 
 def test_auto_head_radius_max_clamp():
     markers = np.tile(np.array([[3.0, 0.0, 0.0]]), (8, 1))
-    radius = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
+    radius, clamp_info = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
     assert radius == pytest.approx(HEAD_CROP_MAX_RADIUS_MM / SCALE_MM_PER_UNIT)
+    assert clamp_info["radius_clamped"] == "max"
+    assert clamp_info["radius_unclamped_mm"] == pytest.approx(
+        3.0 * SCALE_MM_PER_UNIT + HEAD_CROP_MARGIN_MM
+    )
 
 
 def test_auto_head_radius_unavailable_inputs():
@@ -260,6 +274,93 @@ def test_run_head_crop_falls_back_without_scale(tmp_path):
     assert stats["head_crop"]["radius_sfm_units"] == pytest.approx(
         DEFAULT_HEAD_RADIUS_SFM
     )
+    # No markers at all → centre must come from the optical-axis fallback.
+    assert stats["head_crop"]["center_source"] == "optical_axis_fallback"
+
+
+def test_run_head_crop_center_is_marker_centroid(tmp_path):
+    """With enough triangulated corners the crop centres on their centroid,
+    not on the optical-axis intersection (which sits at HEAD_CENTER here)."""
+    rng = np.random.default_rng(4)
+    ply = tmp_path / "dense_filtered.ply"
+    _write_cloud(_make_head_points(rng, n=500), ply)
+    markers = _make_marker_corner_points(rng)
+    assert len(markers) >= HEAD_CROP_MIN_MARKER_CORNERS
+    _, stats = run_head_crop(
+        ply,
+        tmp_path,
+        _make_camera_ring_reconstruction(),
+        head_radius_override=None,
+        scale_factor=SCALE_MM_PER_UNIT,
+        marker_points=markers,
+    )
+    assert stats["head_crop"]["center_source"] == "aruco_centroid"
+    np.testing.assert_allclose(
+        stats["head_crop"]["center_sfm"], markers.mean(axis=0), atol=1e-9
+    )
+
+
+def test_run_head_crop_center_fallback_below_corner_threshold(tmp_path):
+    """Too few corners → centroid untrusted → optical-axis centre is used."""
+    rng = np.random.default_rng(5)
+    ply = tmp_path / "dense_filtered.ply"
+    _write_cloud(_make_head_points(rng, n=500), ply)
+    markers = _make_marker_corner_points(rng)[: HEAD_CROP_MIN_MARKER_CORNERS - 1]
+    _, stats = run_head_crop(
+        ply,
+        tmp_path,
+        _make_camera_ring_reconstruction(),
+        head_radius_override=None,
+        scale_factor=SCALE_MM_PER_UNIT,
+        marker_points=markers,
+    )
+    assert stats["head_crop"]["center_source"] == "optical_axis_fallback"
+    # Camera ring converges on HEAD_CENTER (the origin).
+    np.testing.assert_allclose(stats["head_crop"]["center_sfm"], HEAD_CENTER, atol=1e-9)
+
+
+def test_run_head_crop_records_clamp_sentinel(tmp_path):
+    """A run that trips the max clamp records the flag and offending value."""
+    rng = np.random.default_rng(6)
+    ply = tmp_path / "dense_filtered.ply"
+    _write_cloud(_make_head_points(rng, n=500), ply)
+    # 8 corners on a ring of radius 2 units (200 mm) around the origin: their
+    # centroid is ~the origin, so median distance ≈ 200 mm + 100 mm margin
+    # exceeds HEAD_CROP_MAX_RADIUS_MM and must trip the "max" sentinel.
+    angles = 2 * np.pi * np.arange(8) / 8
+    markers = np.column_stack(
+        [2.0 * np.cos(angles), 2.0 * np.sin(angles), np.zeros(8)]
+    )
+    _, stats = run_head_crop(
+        ply,
+        tmp_path,
+        _make_camera_ring_reconstruction(),
+        head_radius_override=None,
+        scale_factor=SCALE_MM_PER_UNIT,
+        marker_points=markers,
+    )
+    assert stats["head_crop"]["radius_clamped"] == "max"
+    assert stats["head_crop"]["radius_unclamped_mm"] == pytest.approx(
+        2.0 * SCALE_MM_PER_UNIT + HEAD_CROP_MARGIN_MM
+    )
+    assert stats["head_crop"]["radius_sfm_units"] == pytest.approx(
+        HEAD_CROP_MAX_RADIUS_MM / SCALE_MM_PER_UNIT
+    )
+
+
+def test_run_head_crop_clean_run_does_not_trip_sentinel(tmp_path):
+    rng = np.random.default_rng(8)
+    ply = tmp_path / "dense_filtered.ply"
+    _write_cloud(_make_head_points(rng, n=500), ply)
+    _, stats = run_head_crop(
+        ply,
+        tmp_path,
+        _make_camera_ring_reconstruction(),
+        head_radius_override=None,
+        scale_factor=SCALE_MM_PER_UNIT,
+        marker_points=_make_marker_corner_points(rng),
+    )
+    assert stats["head_crop"]["radius_clamped"] is False
 
 
 def test_run_head_crop_override_wins_over_auto(tmp_path):
