@@ -379,6 +379,7 @@ def write_pipeline_manifest(
     mesh_opts: dict,
     scale_factor: float | None,
     scale_sanity: dict | None = None,
+    scale_self_consistency: dict | None = None,
     provenance: dict | None = None,
 ) -> None:
     """Write pipeline_manifest.json to output_dir."""
@@ -398,6 +399,8 @@ def write_pipeline_manifest(
     }
     if scale_sanity is not None:
         manifest["scale_sanity_check"] = scale_sanity
+    if scale_self_consistency is not None:
+        manifest["scale_self_consistency"] = scale_self_consistency
     if provenance is not None:
         manifest.update(provenance)
     out = output_dir / "pipeline_manifest.json"

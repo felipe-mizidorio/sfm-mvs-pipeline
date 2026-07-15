@@ -20,6 +20,7 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     recover_scale_details_safe,
 )
 from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
+from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -90,6 +91,9 @@ def main() -> None:
     scale_sanity = check_marker_layout(
         corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
     )
+    scale_self_consistency = check_scale_self_consistency(
+        corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
+    )
     # Poisson + LCC + visualization.
     logger.info("=== Poisson surface reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
@@ -110,6 +114,7 @@ def main() -> None:
         mesh_cfg["poisson_surface_reconstruction"],
         scale_factor,
         scale_sanity=scale_sanity,
+        scale_self_consistency=scale_self_consistency,
         provenance=build_provenance(
             args.frames_manifest, {"aruco": aruco_cfg, "mesh": mesh_cfg}
         ),

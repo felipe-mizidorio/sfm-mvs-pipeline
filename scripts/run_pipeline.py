@@ -25,6 +25,7 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     recover_scale_details_safe,
 )
 from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
+from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.feature_extraction import (
     camera_prior_from_manifest,
     extract_features,
@@ -320,6 +321,9 @@ def main() -> None:
     scale_sanity = check_marker_layout(
         corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
     )
+    scale_self_consistency = check_scale_self_consistency(
+        corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
+    )
 
     # --- Step 5c/7: Spherical crop to head region (auto-sized from ArUco) ---
     input_for_poisson, crop_stats = run_head_crop(
@@ -360,6 +364,7 @@ def main() -> None:
         mesh_cfg["poisson_surface_reconstruction"],
         scale_factor,
         scale_sanity=scale_sanity,
+        scale_self_consistency=scale_self_consistency,
         provenance=provenance,
     )
 
