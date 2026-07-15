@@ -25,7 +25,10 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     recover_scale_details_safe,
 )
 from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
-from sfm_mvs_pipeline.sfm.feature_extraction import extract_features
+from sfm_mvs_pipeline.sfm.feature_extraction import (
+    camera_prior_from_manifest,
+    extract_features,
+)
 from sfm_mvs_pipeline.sfm.feature_matching import match_features
 from sfm_mvs_pipeline.sfm.reconstruction import run_incremental_mapping
 
@@ -188,6 +191,7 @@ def main() -> None:
     # --- Parse preprocessing manifest (G3) ---
     manifest_frames: list[str] | None = None
     manifest_detections: dict | None = None
+    manifest_data: dict = {}
     mask_path: Path | None = None
     if args.frames_manifest is not None:
         manifest_data = json.loads(args.frames_manifest.read_text())
@@ -209,6 +213,25 @@ def main() -> None:
                     candidate_mask_path,
                 )
 
+    # --- Camera intrinsics: explicit flags > EXIF-derived prior > shared
+    # self-calibration. Same-device video always shares one camera model.
+    camera_model, camera_params = args.camera_model, args.camera_params
+    if camera_model or camera_params:
+        intrinsics_source = "explicit"
+    else:
+        prior = camera_prior_from_manifest(manifest_data)
+        if prior is not None:
+            camera_model, camera_params = prior
+            intrinsics_source = "exif_prior"
+            logger.info(
+                "Camera prior from manifest focal metadata: %s (%s)",
+                camera_model,
+                camera_params,
+            )
+        else:
+            intrinsics_source = "self_calibration_shared"
+    logger.info("Intrinsics source: %s", intrinsics_source)
+
     # --- Step 1/7: Feature extraction ---
     logger.info("=== Step 1/7: Feature extraction ===")
     extract_features(
@@ -216,10 +239,11 @@ def main() -> None:
         image_dir=args.image_dir,
         options=colmap_cfg["feature_extraction"],
         device=device,
-        camera_model=args.camera_model,
-        camera_params=args.camera_params,
+        camera_model=camera_model,
+        camera_params=camera_params,
         image_names=manifest_frames,
         mask_path=mask_path,
+        shared_camera=True,
     )
 
     # --- Step 2/7: Feature matching ---
@@ -323,6 +347,11 @@ def main() -> None:
         apply_scale_to_mesh(mesh_ply, scale_factor)
 
     # --- Step 7/7: Pipeline manifest ---
+    provenance = build_provenance(
+        args.frames_manifest,
+        {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+    )
+    provenance["intrinsics_source"] = intrinsics_source
     write_pipeline_manifest(
         output_dir,
         "run_pipeline.py",
@@ -331,10 +360,7 @@ def main() -> None:
         mesh_cfg["poisson_surface_reconstruction"],
         scale_factor,
         scale_sanity=scale_sanity,
-        provenance=build_provenance(
-            args.frames_manifest,
-            {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
-        ),
+        provenance=provenance,
     )
 
     # --- Optional: Evaluation ---

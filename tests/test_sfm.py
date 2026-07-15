@@ -4,7 +4,10 @@ from unittest.mock import MagicMock, patch
 import pycolmap
 import pytest
 
-from sfm_mvs_pipeline.sfm.feature_extraction import extract_features
+from sfm_mvs_pipeline.sfm.feature_extraction import (
+    camera_prior_from_manifest,
+    extract_features,
+)
 from sfm_mvs_pipeline.sfm.feature_matching import match_features
 
 _EXTRACTION_OPTIONS = {
@@ -100,6 +103,68 @@ class TestFeatureExtraction:
             extract_features(database_path, image_dir, _EXTRACTION_OPTIONS)
 
         assert captured["reader_options"].mask_path == Path(".")
+
+
+class TestSharedCameraAndPrior:
+    def _run(self, tmp_path, **kwargs):
+        image_dir = tmp_path / "images"
+        image_dir.mkdir(exist_ok=True)
+        _place_images(image_dir)
+        database_path = tmp_path / "colmap.db"
+        captured: dict = {}
+
+        def _fake_extract(*args, **kw):
+            captured.update(kw)
+            database_path.touch()
+
+        with patch("pycolmap.extract_features", side_effect=_fake_extract):
+            extract_features(database_path, image_dir, _EXTRACTION_OPTIONS, **kwargs)
+        return captured
+
+    def test_default_camera_mode_is_auto(self, tmp_path):
+        captured = self._run(tmp_path)
+        assert captured["camera_mode"] == pycolmap.CameraMode.AUTO
+
+    def test_shared_camera_uses_single_mode(self, tmp_path):
+        captured = self._run(tmp_path, shared_camera=True)
+        assert captured["camera_mode"] == pycolmap.CameraMode.SINGLE
+
+    def test_explicit_camera_model_still_single(self, tmp_path):
+        captured = self._run(tmp_path, camera_model="SIMPLE_RADIAL")
+        assert captured["camera_mode"] == pycolmap.CameraMode.SINGLE
+        assert captured["reader_options"].camera_model == "SIMPLE_RADIAL"
+
+
+class TestCameraPriorFromManifest:
+    def test_focal_prior_derived_from_f35(self):
+        manifest = {
+            "camera": {"focal_length_35mm": 27.0, "width_px": 480, "height_px": 852}
+        }
+        prior = camera_prior_from_manifest(manifest)
+
+        assert prior is not None
+        model, params = prior
+        assert model == "SIMPLE_RADIAL"
+        f, cx, cy, k = (float(v) for v in params.split(","))
+        assert f == pytest.approx(27.0 * 480 / 36.0)
+        assert cx == pytest.approx(240.0)
+        assert cy == pytest.approx(426.0)
+        assert k == 0.0
+
+    def test_no_camera_block_returns_none(self):
+        assert camera_prior_from_manifest({}) is None
+        assert camera_prior_from_manifest({"camera": {}}) is None
+
+    def test_null_focal_returns_none(self):
+        manifest = {
+            "camera": {"focal_length_35mm": None, "width_px": 480, "height_px": 852}
+        }
+        assert camera_prior_from_manifest(manifest) is None
+
+    def test_missing_dimensions_returns_none(self):
+        assert (
+            camera_prior_from_manifest({"camera": {"focal_length_35mm": 27.0}}) is None
+        )
 
 
 class TestFeatureMatching:

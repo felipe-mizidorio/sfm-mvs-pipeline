@@ -8,6 +8,28 @@ logger = logging.getLogger(__name__)
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".bmp"}
 
 
+def camera_prior_from_manifest(manifest_data: dict) -> tuple[str, str] | None:
+    """Derive an intrinsics prior from the frames manifest's camera block.
+
+    Uses the 35mm-equivalent focal length recorded by preprocessing:
+    fx ≈ f35 × image_width_px / 36. Returns (camera_model, camera_params)
+    suitable for extract_features, or None when the manifest carries no
+    usable focal metadata (the common case: messaging apps strip it).
+
+    The params act as a bundle-adjustment initialization, not a fixed
+    calibration — COLMAP still refines focal length during mapping.
+    """
+    camera = manifest_data.get("camera") or {}
+    f35 = camera.get("focal_length_35mm")
+    width = camera.get("width_px")
+    height = camera.get("height_px")
+    if not f35 or not width or not height:
+        return None
+    fx = float(f35) * float(width) / 36.0
+    params = f"{fx},{float(width) / 2.0},{float(height) / 2.0},0"
+    return "SIMPLE_RADIAL", params
+
+
 def extract_features(
     database_path: Path,
     image_dir: Path,
@@ -17,6 +39,7 @@ def extract_features(
     camera_params: str | None = None,
     image_names: list[str] | None = None,
     mask_path: Path | None = None,
+    shared_camera: bool = False,
 ) -> None:
     if not image_dir.exists():
         raise ValueError(f"image_dir does not exist: {image_dir}")
@@ -46,8 +69,12 @@ def extract_features(
     if mask_path is not None:
         reader_options.mask_path = mask_path
         logger.info("Using mask directory: '%s'", mask_path)
+    # One shared camera for same-device video frames (explicit calibration
+    # always implies it); AUTO's per-image self-calibration is the legacy path.
     camera_mode = (
-        pycolmap.CameraMode.SINGLE if camera_model is not None else pycolmap.CameraMode.AUTO
+        pycolmap.CameraMode.SINGLE
+        if camera_model is not None or shared_camera
+        else pycolmap.CameraMode.AUTO
     )
 
     logger.info(
