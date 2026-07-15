@@ -1,6 +1,10 @@
 aruco:
-  # Physical side length of the ArUco marker square in millimetres
-  marker_length_mm: 50.0
+  # Physical side length of the ArUco marker square (outer black border, the
+  # edge enclosed by OpenCV-detected corners) in millimetres.
+  # Source: ruler measurement of a marker taped to the AJCARE neonatal phantom,
+  # 2026-07-15 (generator PDF renders 30.0 mm, but the print was scaled down —
+  # the physical measurement wins).
+  marker_length_mm: 20.0
   # OpenCV ArUco dictionary ID (0 = DICT_4X4_50, 1 = DICT_4X4_100, 2 = DICT_4X4_250)
   dict_id: 2
   # Minimum number of image views required to triangulate a marker corner
