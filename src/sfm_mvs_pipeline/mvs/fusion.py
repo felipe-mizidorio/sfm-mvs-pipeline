@@ -16,6 +16,7 @@ def fuse_depth_maps(
     options: dict,
     bbox_min: list[float] | None = None,
     bbox_max: list[float] | None = None,
+    mask_path: Path | None = None,
 ) -> pycolmap.Reconstruction:
     depth_maps_dir = mvs_path / _DEPTH_MAPS_DIR
     if not depth_maps_dir.exists() or not any(depth_maps_dir.iterdir()):
@@ -29,6 +30,13 @@ def fuse_depth_maps(
     fusion_options = pycolmap.StereoFusionOptions()
     fusion_options.min_num_pixels = options["min_num_pixels"]
     fusion_options.max_reproj_error = options["max_reproj_error"]
+
+    if mask_path is not None:
+        # Masks must be aligned to the UNDISTORTED workspace images (see
+        # mvs/mask_undistortion.py). Only pixels with mask value > 0 may
+        # contribute fused points.
+        fusion_options.mask_path = str(mask_path)
+        logger.info("Fusion mask directory: '%s'", mask_path)
 
     if bbox_min is not None and bbox_max is not None:
         # pycolmap expects float32 arrays of shape (3, 1); pyright cannot prove

@@ -12,6 +12,7 @@ import yaml
 from sfm_mvs_pipeline.evaluation.metrics import evaluate
 from sfm_mvs_pipeline.mvs.dense_reconstruction import run_dense_reconstruction
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
+from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
     run_head_crop,
@@ -293,6 +294,20 @@ def main() -> None:
         options=colmap_cfg["patch_match_stereo"],
     )
 
+    # --- Step 4b/7: Warp masks into the undistorted MVS workspace ---
+    # Fusion is where background bleed is deposited (Phase 0 finding); the
+    # feature-extraction masks never reach MVS, so they are re-projected here
+    # for StereoFusionOptions.mask_path.
+    fusion_mask_dir: Path | None = None
+    fusion_mask_stats: dict | None = None
+    if mask_path is not None:
+        logger.info("=== Step 4b/7: Undistorting masks for stereo fusion ===")
+        fusion_mask_dir, fusion_mask_stats = undistort_masks(
+            mask_path=mask_path,
+            original_sparse_path=sparse_model_path,
+            mvs_path=mvs_dir,
+        )
+
     # --- Step 5/7: Stereo fusion ---
     logger.info("=== Step 5/7: Stereo fusion ===")
     fuse_depth_maps(
@@ -301,6 +316,7 @@ def main() -> None:
         options=colmap_cfg["stereo_fusion"],
         bbox_min=args.bbox_min,
         bbox_max=args.bbox_max,
+        mask_path=fusion_mask_dir,
     )
 
     # --- Step 5b/7: Point cloud filtering (SOR) + visualization ---
@@ -356,6 +372,12 @@ def main() -> None:
         {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
     )
     provenance["intrinsics_source"] = intrinsics_source
+    if fusion_mask_stats is not None:
+        provenance["fusion_masks"] = {
+            "source_mask_dir": str(mask_path),
+            "workspace_mask_dir": str(fusion_mask_dir),
+            **fusion_mask_stats,
+        }
     write_pipeline_manifest(
         output_dir,
         "run_pipeline.py",
