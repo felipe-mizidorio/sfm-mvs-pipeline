@@ -4,8 +4,10 @@
 **Plan:** `heAICare/docs/ACTION_PLAN_mesh_quality.md`
 **Session:** `video_test_20260716_115516_arm1_baseline` (intact MVS workspace, 532 depth maps)
 **Repository state:** `master` @ `73b1dfc`
-**Recommendation:** **one small change** — `taubin_smoothing.iterations: 10 → 5`. Every other
-parameter in `mesh.yaml` and `colmap.yaml` stays where it is.
+**Recommendation:** **one small change** — `taubin_smoothing.iterations: 10 → 0` (smoothing off).
+Every other parameter in `mesh.yaml` and `colmap.yaml` stays where it is.
+**Principal finding:** both visible mesh defects are non-configurable; their causes are
+capture-side.
 
 ---
 
@@ -38,8 +40,14 @@ markers on a matt-black textureless phantom, plus thin coverage, are capture-pro
 properties. No parameter in this pipeline reaches them.
 
 Every upstream filter that *does* reduce roughness pays for it in coverage or in dimensions,
-which the plan's fidelity constraint rules out. The only change that survives on evidence is
-trimming Taubin from 10 iterations to 5, which is a minor efficiency, not a fix.
+which the plan's fidelity constraint rules out.
+
+The only configuration change is therefore to turn Taubin smoothing **off** (10 → 0). Taubin
+turned out to be radially unbiased, so it was not doing harm — but it can remove at most ~10% of
+a roughness whose cause is now known to be capture-side, and shipping no smoothing means every
+morphometric measurement traces to fused geometry with no intervening filter to defend. The
+tuned `lambda_filter`/`mu` and the measured knee (5 iterations) are retained in the config and
+below, so re-enabling is a one-token change if morphometry later calls for it.
 
 ---
 
@@ -247,6 +255,32 @@ flattens genuine structure.
 
 Figure: `heAICare/analysis/results/mesh_quality/figures/fig3_taubin_tradeoff.png`.
 
+### Why the shipped value is 0 and not the measured optimum of 5
+
+The measurements above identify **5** as the knee. The shipped value is **0**. That is a
+deliberate choice against the local optimum, and the reasoning belongs on the record.
+
+The shrinkage objection that motivated examining Taubin in the first place turned out to be
+**wrong** — the filter is radially unbiased, so nothing here argues that smoothing damages the
+morphometry. Five iterations would be defensible on the numbers.
+
+What changed the decision is what the roughness *is*. T1 attributes it to marker-border relief
+and thin frame coverage: physical properties of how this capture was performed. Smoothing does
+not remove that roughness, it renders it less visible, and the most it can remove is ~10%.
+Spending any surface displacement — even unbiased, even 0.046 mm — to cosmetically attenuate an
+artifact whose cause is now known and documented buys nothing the morphometry needs.
+
+The concrete benefit of 0 is evidential rather than geometric: a mesh that has had no smoothing
+applied requires no argument that its displacement was harmless. Every measurement taken from it
+traces to fused geometry without an intervening filter, so the "is this an artifact of
+smoothing?" question cannot be raised against a downstream morphometric result. At a ~10% ceiling
+on roughness reduction, that is a better trade than the smoothing.
+
+The parameter is not removed. `lambda_filter` and `mu` keep their tuned values, `iterations: 0`
+is a one-token change, and 5 is recorded above as the knee if morphometry later shows smoothing
+is actually needed. This is a reversible default, chosen to keep the mesh evidentially clean —
+not a finding that Taubin is harmful.
+
 ---
 
 ## Recommended configuration
@@ -257,12 +291,14 @@ Figure: `heAICare/analysis/results/mesh_quality/figures/fig3_taubin_tradeoff.png
 @@ poisson_surface_reconstruction:
    taubin_smoothing:
 -    iterations: 10
-+    iterations: 5
++    iterations: 0
      lambda_filter: 0.5
      mu: -0.53
 ```
 
-That is the entire diff. Unchanged and now positively justified rather than merely inherited:
+That is the entire diff: smoothing off, tuned `lambda_filter`/`mu` retained so re-enabling is a
+one-token change (see "Why the shipped value is 0 and not the measured optimum of 5" above).
+Unchanged and now positively justified rather than merely inherited:
 
 | Parameter | Value | Why it stays |
 |---|---|---|
@@ -273,32 +309,82 @@ That is the entire diff. Unchanged and now positively justified rather than mere
 | `stereo_fusion.min_num_pixels` | 5 | 7 costs 33% of points and opens holes |
 | `stereo_fusion.max_reproj_error` | 2.0 | 1.0 denoises but opens holes (ref→arm p99 2.05 mm) |
 
-**Smoothing bias accepted at the recommended setting:** mean vertex displacement 0.046 mm,
-p95 0.108 mm, max 1.66 mm, surface area −1.77%, radial bias +0.0001 mm (statistically no
-direction), head extents within 0.26 mm. Given that scale itself is unvalidated, this is far
-below the level at which the mesh's morphometric conclusions could turn on it.
+**Smoothing bias accepted at the shipped setting: none — zero, by construction.** With
+`iterations: 0` no smoothing filter runs, so mesh vertices are the Poisson solution over the
+fused cloud and no displacement is introduced at any point in the mesh stage. Nothing about a
+downstream morphometric measurement needs to be defended against a smoothing artifact.
+
+For reference, had 5 iterations been shipped the accepted cost would have been: mean vertex
+displacement 0.046 mm, p95 0.108 mm, max 1.66 mm, surface area −1.77%, radial bias +0.0001 mm
+(statistically no direction), head extents within 0.26 mm. That cost was small and unbiased —
+it was declined because what it buys (~10% less roughness, on a capture-side artifact) is worth
+less than keeping the mesh free of any filter that has to be argued about.
 
 ---
 
-## What this does not fix, and what would
+## Conclusion: both defects are non-configurable
 
-Both original defects survive this work, and now have a documented cause:
+**This is the finding of this work, not a failure to find one.** Both visible mesh defects were
+traced to their origin, and neither origin is reachable from any parameter in `mesh.yaml` or
+`colmap.yaml`. The question the plan asked — "which already-present parameters best reduce both
+defects?" — has a definite and useful answer: **none of them do, and here is why.**
 
-1. **The pale membrane** is occlusion-boundary background bleed (white mug and bright desk
-   behind the head contour), sitting a median ~5 px from the dark silhouette. Confirmed again
-   here from the trim side: it is at healthy Poisson density and no threshold reaches it. It
-   has now resisted ArUco hull masks at feature extraction, at fusion, and density trimming.
-   Remaining levers are unchanged and all capture- or silhouette-side: an eroded tight
-   silhouette mask at fusion (plumbing exists, opt-in), silhouette-aware point filtering, or
-   a dark backdrop under the chin at capture.
+That is a result with teeth. It closes parameter tuning as an avenue, it redirects effort to
+where the causes actually are, and it means the mesh stage can be treated as settled while the
+morphometric module is built on top of it.
 
-2. **Surface roughness** is dominated by marker-border depth discontinuities (2.2× the flat
-   surface) and thin frame coverage (2–3 views is 1.5× rougher than 10+). Both are capture
-   properties. Reducing them means changing the capture — flatter/lower-contrast markers, a
-   textured cap instead of taped squares, or denser view coverage — not the mesh stage.
+### Defect 1 — the pale membrane
 
-The mesh stage is, on this evidence, close to as good as its input allows. The productive
-next work is upstream of it.
+Occlusion-boundary background bleed: the white mug and bright desk sit directly behind and below
+the head contour, and PatchMatch mixes them in at the silhouette. Contaminated points sit a
+median ~5 px from the dark silhouette.
+
+Non-configurable because the membrane vertices carry *healthy* Poisson density (median around
+the 0.21 quantile). `density_threshold` is a global quantile, so no value in a sane range reaches
+them, and every increase removes genuine surface at a 1:1 rate with membrane. The defect has now
+resisted, on measurement: ArUco hull masks at feature extraction, ArUco hull masks at fusion, and
+density trimming — three independent attempts, all failing for the same underlying reason (mask
+boundaries and trim thresholds are both far from the ~5 px bleed band).
+
+**Capture-protocol remedies:** a dark, non-reflective backdrop placed under the chin and behind
+the head contour, removing the bright background from the silhouette region entirely; and raising
+the head off pale supporting surfaces so no bright object sits within the occlusion boundary. In
+processing, the one untried lever is an eroded tight silhouette mask applied at fusion only — the
+plumbing exists and is opt-in — or silhouette-aware point filtering.
+
+### Defect 2 — surface roughness
+
+Marker-border depth discontinuities (2.2× the roughness of flat surface, rising monotonically
+with local colour contrast) and thin frame coverage (2–3 views is 1.5× rougher than 10+).
+
+Non-configurable because it is already present in the fused cloud before the mesh stage begins —
+the cloud is 2.0–3.6× rougher than the mesh fitted to it, so Poisson is attenuating this
+roughness, not producing it. Every upstream filter that reduces it further does so by discarding
+coverage or by deforming dimensions, which the fidelity constraint rejects.
+
+**Capture-protocol remedies:**
+
+1. **Non-raised markers printed directly into the cap fabric**, replacing taped-on squares. This
+   addresses the dominant term. The current markers present both a physical step (tape relief)
+   and a high-contrast intensity edge to a PatchMatch window of radius 5; printing the pattern
+   into the fabric removes the relief entirely and keeps the ArUco detection the scale recovery
+   depends on. Lower-contrast marker ink would further soften the intensity step, subject to
+   keeping detection reliable.
+2. **More camera passes over low-view regions.** Roughness falls monotonically with view count
+   across the whole measured range (0.289 mm at 2–3 views → 0.191 mm at 10+), with no sign of
+   saturating, so additional passes over thinly-covered regions should continue to pay. The
+   per-region view counts needed to target those passes are already recoverable from
+   `dense.ply.vis`.
+
+Neither remedy is started here — capture-protocol changes are explicitly out of scope for this
+plan, and both are recorded as limitations for the capture track to pick up.
+
+### Where this leaves the mesh stage
+
+On this evidence the mesh stage is as good as its input allows, and its parameters are now
+justified by measurement rather than inherited by default. The mesh it produces is trustworthy
+for the morphometric module to consume, within the standing unvalidated-scale caveat. The
+productive next work is upstream of it, in the capture.
 
 ---
 
@@ -318,16 +404,72 @@ Tooling lives in `heAICare/analysis/` (outside this repo); results and figures i
 | `marker_edge_roughness.py` | Roughness vs local colour contrast |
 | `mesh_quality_figures.py`, `render_roughness.py` | Figures |
 
-Two methodological traps worth keeping, both of which produced plausible-looking wrong
-numbers before being caught:
+One methodological trap worth keeping, which produced plausible-looking wrong numbers before
+being caught:
 
 - **The kNN cap must not bind.** The roughness query is fixed-radius but implemented as
   capped kNN; when the cap saturates, the effective radius silently shrinks in dense regions
   and the mesh/cloud comparison stops being like-for-like. `mesh_roughness.py` reports
   `mesh_saturated_frac` / `cloud_saturated_frac`; both must be ~0. The first pass saturated at
   96 neighbours (median 96 for both fields) and had to be re-run at 1024.
-- **Open3D's Poisson is not bit-deterministic in vertex ordering across processes.** Meshes
-  from two separate solves match in vertex *count* but not index, so per-vertex differencing
-  returns nonsense (a first Taubin run reported 67 mm mean displacement). All variants to be
-  compared per-vertex must be built in a single `mesh_variants.py` invocation;
-  `smoothing_displacement.py` now aborts above a 5 mm median rather than reporting it.
+
+The second trap encountered — non-deterministic Poisson vertex ordering — is written up as a
+standalone limitation below, because it constrains reproducibility beyond this report.
+
+---
+
+## Limitation: Open3D Poisson vertex ordering is not deterministic across processes
+
+**Relevant to the reproducibility track. Cite this rather than the methodology note above.**
+
+### Statement
+
+`open3d.geometry.TriangleMesh.create_from_point_cloud_poisson` does not produce a
+bit-reproducible vertex ordering across separate process invocations. Given the identical input
+cloud and identical parameters, two runs in two processes yield meshes that agree in vertex and
+triangle **count** but not in vertex **index**: vertex *i* of one mesh is not the same surface
+point as vertex *i* of the other.
+
+Observed with Open3D 0.19.0 on Windows, depth 9, 864,928-point input. Both runs returned
+506,716 vertices / 1,013,252–1,013,253 triangles — a count agreement close enough to look like
+determinism to any check based on counts.
+
+### Why it matters
+
+It silently invalidates **index-based vertex correspondence**, which is the natural and
+efficient way to compare two meshes built from the same cloud — exactly what a smoothing,
+filtering, or regression comparison wants to do. The failure is not loud. Differencing
+positions vertex-by-vertex across two solves returns a well-formed array of plausible-looking
+floats; in this work it reported a mean vertex displacement of **67 mm** for a filter whose true
+displacement is **0.067 mm** — three orders of magnitude, from code that raised no error.
+
+The danger is that count agreement reads as a successful sanity check. `len(a.vertices) ==
+len(b.vertices)` passed in every case here and proves nothing about correspondence.
+
+### Consequences for reproducibility claims
+
+- A mesh SHA-256 is **not** a valid reproducibility check for this pipeline's mesh stage. Two
+  correct runs of identical input and configuration can produce different bytes. Reproducibility
+  must be asserted on geometric quantities (surface deviation, area, extents, vertex/triangle
+  counts, derived measurements), never on file digests or vertex arrays.
+- Any per-vertex comparison is valid **only** within a single process, sharing one Poisson solve.
+  Across processes, correspondence must be re-established geometrically — nearest-point or
+  ray-cast distance, as in `analysis/mesh_deviation.py`.
+- Regression tests over meshes must assert on geometric invariants with tolerances, not on exact
+  vertex data.
+
+### Mitigations applied here
+
+Variants requiring per-vertex comparison are built in a single `mesh_variants.py` invocation, so
+they share one Poisson solve and one vertex ordering. `smoothing_displacement.py` refuses to
+report a result when the median displacement exceeds 5 mm — far above any plausible smoothing
+effect, far below the object-scale nonsense that misalignment produces — and instructs the
+caller to rebuild the variants together. Comparisons that legitimately span clouds
+(`mesh_deviation.py`) use geometric correspondence and are unaffected.
+
+### Not investigated
+
+Whether the non-determinism originates in Open3D's parallel octree traversal or in the upstream
+PoissonRecon isosurface extraction was not pursued — out of scope here. Nor was it tested
+whether single-threaded execution restores deterministic ordering, which would be the natural
+first probe if a reproducible ordering is ever required.

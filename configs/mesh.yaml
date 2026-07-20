@@ -13,13 +13,18 @@ poisson_surface_reconstruction:
   # Keep only the largest connected component after Poisson reconstruction (removes background noise)
   keep_largest_component: true
   # Taubin smoothing applied after LCC — removes high-frequency wrinkles from MVS noise.
-  # Remove or set iterations: 0 to skip.
-  # 5 iterations is the knee: it captures 91% of the available roughness reduction,
-  # and going to 10 buys a further 0.6% for 46% more vertex displacement. Taubin is
-  # radially unbiased here (mean inward movement +0.0001 mm), so it does not shrink
-  # the head — see docs/mesh_quality_report.md.
+  # DISABLED (iterations: 0). Set iterations > 0 to re-enable; lambda/mu below are the
+  # tuned values and 5 is the measured knee (91% of the available roughness reduction
+  # at 46% less vertex displacement than 10).
+  #
+  # Disabled deliberately, not because it is harmful: Taubin is radially unbiased here
+  # (mean inward movement +0.0001 mm), so the shrinkage objection does not apply. But
+  # the total reduction it can offer is only ~10%, against a roughness now attributed
+  # to marker-border relief and thin frame coverage — capture protocol, not geometry
+  # processing. Shipping no smoothing means the mesh carries no displacement argument
+  # into the morphometry work. See docs/mesh_quality_report.md.
   taubin_smoothing:
-    iterations: 5
+    iterations: 0
     lambda_filter: 0.5
     mu: -0.53
 
