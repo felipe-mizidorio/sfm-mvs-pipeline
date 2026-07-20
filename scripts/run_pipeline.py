@@ -12,12 +12,13 @@ import yaml
 from sfm_mvs_pipeline.evaluation.metrics import evaluate
 from sfm_mvs_pipeline.mvs.dense_reconstruction import run_dense_reconstruction
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
-from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks
+from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
     run_head_crop,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
+    with_fusion_mask_provenance,
     write_pipeline_manifest,
 )
 from sfm_mvs_pipeline.scale.aruco_scale import (
@@ -162,6 +163,16 @@ def _parse_args() -> argparse.Namespace:
         metavar=("X", "Y", "Z"),
         help="Maximum corner of axis-aligned bounding box for stereo fusion clipping.",
     )
+    parser.add_argument(
+        "--fusion-masks",
+        action="store_true",
+        help="EXPERIMENTAL. Also restrict stereo fusion to the frames-manifest masks "
+        "(warped into the undistorted MVS workspace). Off by default: with the "
+        "current ArUco convex-hull masks this deletes genuine head surface away "
+        "from the markers without reducing silhouette bleed — see "
+        "docs/fusion_masks_report.md. Masks always apply to feature extraction "
+        "regardless of this flag.",
+    )
     return parser.parse_args()
 
 
@@ -295,14 +306,20 @@ def main() -> None:
     )
 
     # --- Step 4b/7: Warp masks into the undistorted MVS workspace ---
-    # Fusion is where background bleed is deposited (Phase 0 finding); the
-    # feature-extraction masks never reach MVS, so they are re-projected here
-    # for StereoFusionOptions.mask_path.
+    # Feature-extraction masks never reach MVS, so they are re-projected here for
+    # StereoFusionOptions.mask_path. Opt-in: measured on video_test_20260716_115516,
+    # ArUco hull masks at fusion cut 9.3% of mesh area inside the head sphere while
+    # leaving silhouette contamination flat (docs/fusion_masks_report.md).
     fusion_mask_dir: Path | None = None
     fusion_mask_stats: dict | None = None
-    if mask_path is not None:
+    if args.fusion_masks and mask_path is None:
+        logger.warning(
+            "--fusion-masks requested but no mask directory is available; "
+            "fusing unmasked."
+        )
+    if args.fusion_masks and mask_path is not None:
         logger.info("=== Step 4b/7: Undistorting masks for stereo fusion ===")
-        fusion_mask_dir, fusion_mask_stats = undistort_masks(
+        fusion_mask_dir, fusion_mask_stats = undistort_masks_safe(
             mask_path=mask_path,
             original_sparse_path=sparse_model_path,
             mvs_path=mvs_dir,
@@ -372,12 +389,13 @@ def main() -> None:
         {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
     )
     provenance["intrinsics_source"] = intrinsics_source
-    if fusion_mask_stats is not None:
-        provenance["fusion_masks"] = {
-            "source_mask_dir": str(mask_path),
-            "workspace_mask_dir": str(fusion_mask_dir),
-            **fusion_mask_stats,
-        }
+    with_fusion_mask_provenance(
+        provenance,
+        enabled=fusion_mask_dir is not None,
+        source_mask_dir=mask_path,
+        workspace_mask_dir=fusion_mask_dir,
+        stats=fusion_mask_stats,
+    )
     write_pipeline_manifest(
         output_dir,
         "run_pipeline.py",

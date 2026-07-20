@@ -13,6 +13,7 @@ regions introduced by undistortion) are set to 0 — they carry no image content
 """
 
 import logging
+import time
 from pathlib import Path
 
 import cv2
@@ -85,6 +86,31 @@ def undistortion_maps(
     return map_x, map_y
 
 
+def undistort_masks_safe(
+    mask_path: Path,
+    original_sparse_path: Path,
+    mvs_path: Path,
+    output_dir_name: str = "fusion_masks",
+) -> tuple[Path | None, dict | None]:
+    """``undistort_masks`` that degrades to unmasked fusion instead of aborting.
+
+    Mask warping runs after PatchMatch Stereo, so raising here would discard an
+    expensive GPU stage over an optional refinement. Follows the established
+    warn-don't-abort convention (see scale/layout_check.py): the failure is
+    logged prominently and returned as ``None`` so the caller records
+    ``fusion_masks.enabled = false`` with the reason.
+    """
+    try:
+        return undistort_masks(mask_path, original_sparse_path, mvs_path, output_dir_name)
+    except (ValueError, OSError) as exc:
+        logger.error(
+            "Fusion mask undistortion FAILED (%s). Continuing with UNMASKED fusion — "
+            "the dense cloud will contain background that masks would have removed.",
+            exc,
+        )
+        return None, {"enabled_requested": True, "failure": str(exc)}
+
+
 def undistort_masks(
     mask_path: Path,
     original_sparse_path: Path,
@@ -101,6 +127,7 @@ def undistort_masks(
     Returns:
         (output directory, stats dict).
     """
+    start = time.perf_counter()
     original_rec = pycolmap.Reconstruction(str(original_sparse_path))
     mvs_rec = pycolmap.Reconstruction(str(mvs_path / "sparse"))
     out_dir = mvs_path / output_dir_name
@@ -143,8 +170,25 @@ def undistort_masks(
         cv2.imwrite(str(out_dir / f"{image.name}.png"), warped)
         written += 1
 
-    stats = {"masks_written": written, "masks_missing": missing}
+    stats = {
+        "masks_written": written,
+        "masks_missing": missing,
+        "warp_seconds": round(time.perf_counter() - start, 3),
+    }
     logger.info(
-        "Fusion masks: %d written, %d missing -> '%s'", written, missing, out_dir
+        "Fusion masks: %d written, %d missing -> '%s' (%.1f s)",
+        written,
+        missing,
+        out_dir,
+        stats["warp_seconds"],
     )
+    if missing:
+        # COLMAP fuses an image with no mask file at full frame, so every missing
+        # mask is a silent hole in the masking — surface it rather than let the
+        # per-image debug warnings scroll past.
+        logger.warning(
+            "%d of %d images have no fusion mask and will be fused UNMASKED.",
+            missing,
+            written + missing,
+        )
     return out_dir, stats

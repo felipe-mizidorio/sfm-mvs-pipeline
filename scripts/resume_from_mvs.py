@@ -16,16 +16,19 @@ import argparse
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 
 import yaml
 
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
+from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
     run_head_crop,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
+    with_fusion_mask_provenance,
     write_pipeline_manifest,
 )
 from sfm_mvs_pipeline.scale.aruco_scale import (
@@ -113,6 +116,12 @@ def main() -> None:
         action="store_true",
         help="Skip stereo fusion and reuse the existing dense.ply (already in SfM units).",
     )
+    parser.add_argument(
+        "--fusion-masks",
+        action="store_true",
+        help="Warp the frames-manifest masks into the undistorted MVS workspace and "
+        "restrict stereo fusion to them. Requires --frames-manifest with a 'mask_dir'.",
+    )
     args = parser.parse_args()
 
     with args.aruco_config.open() as f:
@@ -133,9 +142,30 @@ def main() -> None:
         _guard_against_double_scale(output_dir)
 
     manifest_detections = None
+    manifest_data = None
     if args.frames_manifest is not None:
         manifest_data = json.loads(args.frames_manifest.read_text())
         manifest_detections = manifest_data.get("marker_detections")
+
+    # Masks live next to the frames the manifest describes, exactly as in
+    # run_pipeline.py: <image-dir>/<manifest mask_dir>.
+    mask_path: Path | None = None
+    if args.fusion_masks:
+        if manifest_data is None:
+            logger.error("--fusion-masks requires --frames-manifest. Aborting.")
+            sys.exit(1)
+        if not manifest_data.get("mask_dir"):
+            logger.error(
+                "--fusion-masks requested but frames manifest '%s' has no 'mask_dir'. Aborting.",
+                args.frames_manifest,
+            )
+            sys.exit(1)
+        candidate = args.image_dir / manifest_data["mask_dir"]
+        if not candidate.is_dir():
+            logger.error("Mask directory '%s' does not exist. Aborting.", candidate)
+            sys.exit(1)
+        mask_path = candidate
+        logger.info("Using mask directory: '%s'", mask_path)
 
     reconstruction, best_sparse = load_best_reconstruction(sparse_dir)
     logger.info(
@@ -145,17 +175,29 @@ def main() -> None:
     )
 
     # --- Step 1: Stereo fusion ---
+    fusion_mask_dir: Path | None = None
+    fusion_mask_stats: dict | None = None
     if args.skip_fusion:
         logger.info("Skipping stereo fusion (--skip-fusion). Using existing '%s'.", dense_ply)
     else:
+        if mask_path is not None:
+            logger.info("=== Undistorting masks for stereo fusion ===")
+            fusion_mask_dir, fusion_mask_stats = undistort_masks_safe(
+                mask_path=mask_path,
+                original_sparse_path=best_sparse,
+                mvs_path=mvs_dir,
+            )
         logger.info("=== Stereo fusion ===")
+        fusion_start = time.perf_counter()
         fuse_depth_maps(
             mvs_path=mvs_dir,
             output_path=dense_ply,
             options=colmap_cfg["stereo_fusion"],
             bbox_min=args.bbox_min,
             bbox_max=args.bbox_max,
+            mask_path=fusion_mask_dir,
         )
+        logger.info("Stereo fusion took %.1f s", time.perf_counter() - fusion_start)
 
     # --- Step 2: SOR on raw dense cloud ---
     logger.info("=== Point cloud filtering (SOR) ===")
@@ -214,9 +256,15 @@ def main() -> None:
         scale_factor,
         scale_sanity=scale_sanity,
         scale_self_consistency=scale_self_consistency,
-        provenance=build_provenance(
-            args.frames_manifest,
-            {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+        provenance=with_fusion_mask_provenance(
+            build_provenance(
+                args.frames_manifest,
+                {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+            ),
+            enabled=fusion_mask_dir is not None,
+            source_mask_dir=mask_path,
+            workspace_mask_dir=fusion_mask_dir,
+            stats=fusion_mask_stats,
         ),
     )
 

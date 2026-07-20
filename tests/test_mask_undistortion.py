@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
-from sfm_mvs_pipeline.mvs.mask_undistortion import undistortion_maps
+from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe, undistortion_maps
+from sfm_mvs_pipeline.pipeline.orchestration import with_fusion_mask_provenance
 
 _FUSION_OPTIONS = {
     "min_num_pixels": 5,
@@ -119,3 +120,47 @@ def test_fusion_mask_path_not_set_by_default(mock_stereo_fusion, mock_fusion_opt
     fuse_depth_maps(mvs_path=mvs_path, output_path=output_path, options=_FUSION_OPTIONS)
 
     assert options_obj.mask_path == ""
+
+
+# --- degradation behaviour ---
+
+
+@patch("sfm_mvs_pipeline.mvs.mask_undistortion.undistort_masks")
+def test_unsupported_model_degrades_to_unmasked_instead_of_aborting(mock_undistort, tmp_path):
+    # Warping runs after PatchMatch Stereo; raising would throw away the GPU stage.
+    mock_undistort.side_effect = ValueError("Unsupported camera model: OPENCV_FISHEYE")
+
+    out_dir, stats = undistort_masks_safe(
+        mask_path=tmp_path / "masks",
+        original_sparse_path=tmp_path / "sparse",
+        mvs_path=tmp_path / "mvs",
+    )
+
+    assert out_dir is None
+    assert stats is not None
+    assert "OPENCV_FISHEYE" in stats["failure"]
+
+
+# --- provenance ---
+
+
+def test_provenance_records_fusion_masks_disabled_explicitly():
+    # An absent key is indistinguishable from a pre-feature run.
+    provenance = with_fusion_mask_provenance({}, enabled=False)
+
+    assert provenance["fusion_masks"] == {"enabled": False}
+
+
+def test_provenance_records_mask_dirs_and_stats_when_enabled(tmp_path):
+    provenance = with_fusion_mask_provenance(
+        {},
+        enabled=True,
+        source_mask_dir=tmp_path / "masks",
+        workspace_mask_dir=tmp_path / "mvs" / "fusion_masks",
+        stats={"masks_written": 266, "masks_missing": 0},
+    )
+
+    block = provenance["fusion_masks"]
+    assert block["enabled"] is True
+    assert block["masks_written"] == 266
+    assert block["source_mask_dir"] == str(tmp_path / "masks")

@@ -371,6 +371,28 @@ def build_provenance(
     }
 
 
+def with_fusion_mask_provenance(
+    provenance: dict,
+    enabled: bool,
+    source_mask_dir: Path | None = None,
+    workspace_mask_dir: Path | None = None,
+    stats: dict | None = None,
+) -> dict:
+    """Record whether stereo fusion was mask-restricted.
+
+    Always writes the ``fusion_masks`` block, including ``enabled: false``. A run
+    that simply omits the key is indistinguishable from one produced before
+    fusion masking existed, which makes past clouds unattributable.
+    """
+    block: dict = {"enabled": enabled}
+    if enabled:
+        block["source_mask_dir"] = str(source_mask_dir)
+        block["workspace_mask_dir"] = str(workspace_mask_dir)
+        block.update(stats or {})
+    provenance["fusion_masks"] = block
+    return provenance
+
+
 def write_pipeline_manifest(
     output_dir: Path,
     run_script: str,
