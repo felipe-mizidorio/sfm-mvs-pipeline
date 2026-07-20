@@ -67,6 +67,23 @@ same script removes that unit asymmetry from the comparison.
 | Arm B output | `data/processed/video_test_20260716_115516_fusion_masked` |
 | Metrics | `heAICare/analysis/results/fusion_{nomask,masked}_metrics.json`, `fusion_vault_integrity.json`, `mask_warp_verification.json` |
 
+### Shared workspace removed (2026-07-20)
+
+The scratch workspace both arms fused from,
+`data/processed/video_test_20260716_115516_fusionmask_ab/`, was **deleted on 2026-07-20**
+to reclaim 3.4 GB. It held only `mvs/` and `sparse/`, and was a copy of
+`video_test_20260716_115516_arm1_baseline`'s — verified identical before deletion by
+file counts, exact byte totals, and matching SHA-256 over both sparse models. It was not
+a byte-for-byte duplicate: it also held a generated `mvs/fusion_masks/` (266 warped
+masks) that regenerates in ~7 s, so nothing irreplaceable was lost.
+
+Every metric in this report is stated in the tables above, so none of it depends on that
+directory. Recomputing the metrics does **not** require re-fusing either: both arms'
+clouds, meshes and manifests are preserved in their own directories, and
+`--workspace-dir` can be pointed at `..._arm1_baseline` instead. That substitution was
+checked before deletion and reproduced the no-mask arm's figures exactly. Per-arm
+instructions are in `WORKSPACE_NOTE.md` inside each arm directory.
+
 ---
 
 ## T1 — Static review of the diff
@@ -148,6 +165,7 @@ Measured with the unchanged provenance test from the 2026-07-15 cheek diagnosis
 | Metric | A: no masks | B: masks | Δ |
 |---|---:|---:|---:|
 | Head points (r = 150 mm) | 860,624 | 790,755 | −8.12% |
+| **Dark head points (coverage guard)** | **733,885** | **674,953** | **−8.03%** |
 | Pale candidates tested | 9,384 | 8,107 | −13.61% |
 | **Contaminated points** | **6,489** | **5,921** | −8.75% |
 | **Contaminated fraction of head** | **0.7540%** | **0.7488%** | **−0.69% relative** |
