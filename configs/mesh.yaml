@@ -5,14 +5,21 @@ poisson_surface_reconstruction:
   scale: 1.1
   # Whether to solve the linear system with a conjugate-gradient solver (True) or direct solver (False)
   linear_fit: false
-  # Vertices below this quantile of the Poisson density array are removed (reduces floating geometry)
+  # Vertices below this quantile of the Poisson density array are removed (reduces floating geometry).
+  # Keep at 0.01: this is a GLOBAL quantile, so raising it shaves the whole surface uniformly
+  # (0.01 -> 0.05 costs 15.6% of pale and 15.1% of genuine dark area) and never reaches the pale
+  # membrane, whose vertices sit at healthy density. See docs/mesh_quality_report.md.
   density_threshold: 0.01
   # Keep only the largest connected component after Poisson reconstruction (removes background noise)
   keep_largest_component: true
-  # Taubin smoothing applied after LCC — removes high-frequency wrinkles from MVS noise
-  # Remove or set iterations: 0 to skip
+  # Taubin smoothing applied after LCC — removes high-frequency wrinkles from MVS noise.
+  # Remove or set iterations: 0 to skip.
+  # 5 iterations is the knee: it captures 91% of the available roughness reduction,
+  # and going to 10 buys a further 0.6% for 46% more vertex displacement. Taubin is
+  # radially unbiased here (mean inward movement +0.0001 mm), so it does not shrink
+  # the head — see docs/mesh_quality_report.md.
   taubin_smoothing:
-    iterations: 10
+    iterations: 5
     lambda_filter: 0.5
     mu: -0.53
 
