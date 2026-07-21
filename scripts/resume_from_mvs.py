@@ -23,12 +23,18 @@ import yaml
 
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
 from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe
+from sfm_mvs_pipeline.postprocess.membrane_filter import (
+    DEFAULT_MARKER_MARGIN_MM,
+    DEFAULT_PALE_THRESHOLD,
+)
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
     run_head_crop,
+    run_membrane_filter,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
     with_fusion_mask_provenance,
+    with_membrane_filter_provenance,
     write_pipeline_manifest,
 )
 from sfm_mvs_pipeline.scale.aruco_scale import (
@@ -121,6 +127,25 @@ def main() -> None:
         action="store_true",
         help="Warp the frames-manifest masks into the undistorted MVS workspace and "
         "restrict stereo fusion to them. Requires --frames-manifest with a 'mask_dir'.",
+    )
+    parser.add_argument(
+        "--membrane-filter",
+        action="store_true",
+        help="Remove pale 'membrane' contamination from the cropped cloud before "
+        "Poisson, protecting the white ArUco marker faces. OFF by default. "
+        "Scene-dependent: assumes a dark subject against pale contamination.",
+    )
+    parser.add_argument(
+        "--membrane-pale-threshold",
+        type=float,
+        default=DEFAULT_PALE_THRESHOLD,
+        help="Mean RGB (0-255) at or above which a point counts as pale.",
+    )
+    parser.add_argument(
+        "--membrane-marker-margin-mm",
+        type=float,
+        default=DEFAULT_MARKER_MARGIN_MM,
+        help="Protection margin added to each marker's own corner extent, in mm.",
     )
     args = parser.parse_args()
 
@@ -222,7 +247,7 @@ def main() -> None:
     )
 
     # --- Step 4: Post-fusion spherical crop (on SOR-filtered cloud) ---
-    input_for_poisson, crop_stats = run_head_crop(
+    cropped_ply, crop_stats = run_head_crop(
         dense_filtered_ply,
         output_dir,
         reconstruction,
@@ -232,6 +257,19 @@ def main() -> None:
     )
     sor_stats.update(crop_stats)
 
+    # --- Step 4b: Optional membrane filter (opt-in, off by default) ---
+    input_for_poisson = cropped_ply
+    membrane_stats: dict | None = None
+    if args.membrane_filter:
+        input_for_poisson, membrane_stats = run_membrane_filter(
+            cropped_ply,
+            output_dir,
+            marker_corners=corners_by_marker,
+            pale_threshold=args.membrane_pale_threshold,
+            marker_margin_mm=args.membrane_marker_margin_mm,
+            scale_factor=scale_factor,
+        )
+
     # --- Step 5: Poisson + LCC + visualization ---
     logger.info("=== Poisson surface reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
@@ -240,10 +278,15 @@ def main() -> None:
 
     # --- Step 6: Apply metric scale once, after meshing ---
     if scale_factor is not None:
-        apply_scale_to_ply(dense_ply, scale_factor)
-        apply_scale_to_ply(dense_filtered_ply, scale_factor)
-        if input_for_poisson != dense_filtered_ply:
-            apply_scale_to_ply(input_for_poisson, scale_factor)
+        # Scale every cloud that was written, each exactly once. The membrane
+        # filter adds a third PLY between the crop and Poisson; scaling only
+        # `input_for_poisson` would leave the cropped cloud in SfM units on a
+        # filtered run but in millimetres on an unfiltered one, making the two
+        # arms incomparable.
+        for ply in dict.fromkeys(
+            [dense_ply, dense_filtered_ply, cropped_ply, input_for_poisson]
+        ):
+            apply_scale_to_ply(ply, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
         logger.info("Applied scale %.6f mm/unit to outputs.", scale_factor)
 
@@ -256,15 +299,19 @@ def main() -> None:
         scale_factor,
         scale_sanity=scale_sanity,
         scale_self_consistency=scale_self_consistency,
-        provenance=with_fusion_mask_provenance(
-            build_provenance(
-                args.frames_manifest,
-                {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+        provenance=with_membrane_filter_provenance(
+            with_fusion_mask_provenance(
+                build_provenance(
+                    args.frames_manifest,
+                    {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
+                ),
+                enabled=fusion_mask_dir is not None,
+                source_mask_dir=mask_path,
+                workspace_mask_dir=fusion_mask_dir,
+                stats=fusion_mask_stats,
             ),
-            enabled=fusion_mask_dir is not None,
-            source_mask_dir=mask_path,
-            workspace_mask_dir=fusion_mask_dir,
-            stats=fusion_mask_stats,
+            enabled=args.membrane_filter,
+            stats=membrane_stats,
         ),
     )
 

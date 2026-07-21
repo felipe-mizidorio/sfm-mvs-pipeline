@@ -18,6 +18,7 @@ import open3d as o3d
 import pycolmap
 
 from sfm_mvs_pipeline.mesh.surface_reconstruction import _apply_lcc, _apply_taubin, _run_poisson
+from sfm_mvs_pipeline.postprocess.membrane_filter import filter_membrane_points
 from sfm_mvs_pipeline.postprocess.point_cloud_filter import filter_point_cloud
 from sfm_mvs_pipeline.visualization.plotly_viz import save_mesh_html, save_point_cloud_html
 
@@ -391,6 +392,77 @@ def with_fusion_mask_provenance(
         block.update(stats or {})
     provenance["fusion_masks"] = block
     return provenance
+
+
+def with_membrane_filter_provenance(
+    provenance: dict,
+    enabled: bool,
+    stats: dict | None = None,
+) -> dict:
+    """Record whether the dense cloud was membrane-filtered before Poisson.
+
+    Always writes the ``membrane_filter`` block, including ``enabled: false``,
+    for the same reason as the fusion-mask block: a run that omits the key is
+    indistinguishable from one produced before the filter existed, which makes
+    past meshes unattributable.
+    """
+    block: dict = {"enabled": enabled}
+    if enabled:
+        block.update(stats or {})
+    provenance["membrane_filter"] = block
+    return provenance
+
+
+def run_membrane_filter(
+    input_ply: Path,
+    output_dir: Path,
+    marker_corners: dict | None,
+    pale_threshold: float,
+    marker_margin_mm: float,
+    scale_factor: float | None,
+) -> tuple[Path, dict]:
+    """Filter pale membrane points out of the cropped cloud before Poisson.
+
+    The cloud is still in SfM units at this point in the pipeline, so the
+    millimetre margin is converted with the recovered scale. Without a scale
+    factor the conversion is impossible and the filter is skipped rather than
+    guessed at.
+
+    Returns:
+        (input_for_poisson, stats) — the filtered PLY when the filter ran, the
+        untouched input otherwise.
+    """
+    if not marker_corners:
+        logger.warning(
+            "Membrane filter requested but no triangulated ArUco markers are "
+            "available to protect — skipping (marker faces are the scale anchor)."
+        )
+        return input_ply, {"enabled": True, "applied": False,
+                          "skipped_reason": "no triangulated markers to protect"}
+    if not scale_factor:
+        logger.warning(
+            "Membrane filter requested but no metric scale was recovered, so the "
+            "millimetre marker margin cannot be converted to SfM units — skipping."
+        )
+        return input_ply, {"enabled": True, "applied": False,
+                           "skipped_reason": "no scale factor for margin conversion"}
+
+    logger.info("=== Membrane filter (colour-based, marker-protected) ===")
+    pcd = o3d.io.read_point_cloud(str(input_ply))
+    filtered, stats = filter_membrane_points(
+        pcd,
+        marker_corners,
+        pale_threshold=pale_threshold,
+        marker_margin=marker_margin_mm / scale_factor,
+    )
+    stats["marker_margin_mm"] = float(marker_margin_mm)
+    if not stats.get("applied"):
+        return input_ply, stats
+
+    out_ply = output_dir / "dense_filtered_cropped_membrane.ply"
+    o3d.io.write_point_cloud(str(out_ply), filtered)
+    logger.info("Membrane-filtered cloud saved to '%s'", out_ply)
+    return out_ply, stats
 
 
 def write_pipeline_manifest(

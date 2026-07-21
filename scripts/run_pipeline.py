@@ -16,10 +16,16 @@ from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
     run_head_crop,
+    run_membrane_filter,
     run_poisson_lcc_and_visualize,
     run_sor_and_visualize,
     with_fusion_mask_provenance,
+    with_membrane_filter_provenance,
     write_pipeline_manifest,
+)
+from sfm_mvs_pipeline.postprocess.membrane_filter import (
+    DEFAULT_MARKER_MARGIN_MM,
+    DEFAULT_PALE_THRESHOLD,
 )
 from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
@@ -172,6 +178,27 @@ def _parse_args() -> argparse.Namespace:
         "from the markers without reducing silhouette bleed — see "
         "docs/fusion_masks_report.md. Masks always apply to feature extraction "
         "regardless of this flag.",
+    )
+    parser.add_argument(
+        "--membrane-filter",
+        action="store_true",
+        help="Remove pale 'membrane' contamination from the cropped cloud before "
+        "Poisson, protecting the white ArUco marker faces. Off by default because "
+        "it is SCENE-DEPENDENT: it assumes a dark subject against pale "
+        "contamination and would delete the subject in a capture where the "
+        "subject is pale. See docs/membrane_filter_report.md.",
+    )
+    parser.add_argument(
+        "--membrane-pale-threshold",
+        type=float,
+        default=DEFAULT_PALE_THRESHOLD,
+        help="Mean RGB (0-255) at or above which a point counts as pale.",
+    )
+    parser.add_argument(
+        "--membrane-marker-margin-mm",
+        type=float,
+        default=DEFAULT_MARKER_MARGIN_MM,
+        help="Protection margin added to each marker's own corner extent, in mm.",
     )
     return parser.parse_args()
 
@@ -359,7 +386,7 @@ def main() -> None:
     )
 
     # --- Step 5c/7: Spherical crop to head region (auto-sized from ArUco) ---
-    input_for_poisson, crop_stats = run_head_crop(
+    cropped_ply, crop_stats = run_head_crop(
         dense_filtered_ply,
         output_dir,
         reconstructions[best_model_idx],
@@ -368,6 +395,19 @@ def main() -> None:
         marker_points=marker_points,
     )
     sor_stats.update(crop_stats)
+
+    # --- Step 5d/7: Optional membrane filter (opt-in, off by default) ---
+    input_for_poisson = cropped_ply
+    membrane_stats: dict | None = None
+    if args.membrane_filter:
+        input_for_poisson, membrane_stats = run_membrane_filter(
+            cropped_ply,
+            output_dir,
+            marker_corners=corners_by_marker,
+            pale_threshold=args.membrane_pale_threshold,
+            marker_margin_mm=args.membrane_marker_margin_mm,
+            scale_factor=scale_factor,
+        )
 
     # --- Step 6/7: Poisson reconstruction + LCC + visualization ---
     logger.info("=== Step 6/7: Surface (Poisson) reconstruction + LCC ===")
@@ -378,9 +418,11 @@ def main() -> None:
     # Scale is applied once per file, after meshing: scaling dense_filtered_ply
     # before Poisson would double-scale the mesh derived from it.
     if scale_factor is not None:
-        apply_scale_to_ply(dense_filtered_ply, scale_factor)
-        if input_for_poisson != dense_filtered_ply:
-            apply_scale_to_ply(input_for_poisson, scale_factor)
+        # Each written cloud scaled exactly once. dict.fromkeys de-duplicates
+        # while preserving order, so a run where the crop or the membrane filter
+        # was skipped does not scale the same file twice.
+        for ply in dict.fromkeys([dense_filtered_ply, cropped_ply, input_for_poisson]):
+            apply_scale_to_ply(ply, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
 
     # --- Step 7/7: Pipeline manifest ---
@@ -395,6 +437,9 @@ def main() -> None:
         source_mask_dir=mask_path,
         workspace_mask_dir=fusion_mask_dir,
         stats=fusion_mask_stats,
+    )
+    with_membrane_filter_provenance(
+        provenance, enabled=args.membrane_filter, stats=membrane_stats
     )
     write_pipeline_manifest(
         output_dir,
