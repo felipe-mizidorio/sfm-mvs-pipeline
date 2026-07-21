@@ -7,6 +7,31 @@
 
 ---
 
+## Related investigations
+
+This is investigation **2 of 4** into the same defect — the pale "membrane" contamination.
+The four are one line of inquiry:
+
+| # | Investigation | Stage attacked | Outcome |
+|---|---|---|---|
+| 1 | ArUco hull masks at feature extraction | SfM features | Negative — `heAICare/docs/three_way_masking_comparison.md` |
+| 2 | The same masks at stereo fusion | Fusion | Negative — this report |
+| 3 | Poisson density trimming | Meshing | Negative — [`mesh_quality_report.md`](mesh_quality_report.md) |
+| 4 | Colour-based dense-cloud filter | Cropped cloud, pre-Poisson | **Positive, for this scene** — [`membrane_filter_report.md`](membrane_filter_report.md) |
+
+Investigations 1–3 all failed for the same underlying reason, which this report states in
+its own terms below: they attacked the symptom at a stage where the contamination is not
+separable from genuine surface. Here that shows up as the mask boundary running through the
+background while the bleed band sits ~5 px from the head silhouette — the masks and the
+contamination are simply not the same pixels.
+
+Investigation 4 succeeded by establishing what the membranes *are* before choosing a stage
+to act at — and it succeeded **for this scene only**; the generalisable remedy remains
+capture-side. See [`membrane_filter_report.md`](membrane_filter_report.md) for that framing
+and [`NEXT_STEPS.md`](NEXT_STEPS.md) for current status.
+
+---
+
 ## Summary
 
 Fusion masks work exactly as designed, and the design does not help this capture.

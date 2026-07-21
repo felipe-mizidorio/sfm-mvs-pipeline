@@ -11,6 +11,31 @@ capture-side.
 
 ---
 
+## Related investigations
+
+The density-trim result below is investigation **3 of 4** into the pale "membrane"
+contamination. The four are one line of inquiry:
+
+| # | Investigation | Stage attacked | Outcome |
+|---|---|---|---|
+| 1 | ArUco hull masks at feature extraction | SfM features | Negative — `heAICare/docs/three_way_masking_comparison.md` |
+| 2 | The same masks at stereo fusion | Fusion | Negative — [`fusion_masks_report.md`](fusion_masks_report.md) |
+| 3 | Poisson density trimming | Meshing | Negative — this report |
+| 4 | Colour-based dense-cloud filter | Cropped cloud, pre-Poisson | **Positive, for this scene** — [`membrane_filter_report.md`](membrane_filter_report.md) |
+
+Investigations 1–3 failed for the same underlying reason: they attacked the symptom at a
+stage where the contamination is not separable from genuine surface. This report's version
+of that finding is the sharpest of the three — `density_threshold` is a *global quantile*,
+so it shaves membrane and genuine head surface in lockstep, and in the lower head where the
+membrane lives it never touches it at all. Points at healthy density are exactly what a
+density quantile cannot reach.
+
+Investigation 4 succeeded by proving the source before choosing a stage — and **for this
+scene only**. Its own conclusion defers to the capture-protocol remedies identified in this
+report as the generalisable fix. Current status in [`NEXT_STEPS.md`](NEXT_STEPS.md).
+
+---
+
 ## Summary
 
 Neither visible defect is fixable from `configs/mesh.yaml`. Both hypotheses the plan was

@@ -11,6 +11,30 @@ explicitly rather than silently.
 
 ---
 
+## Related investigations
+
+This is investigation **4 of 4** into the same defect. The four are one line of inquiry,
+not four unconnected documents:
+
+| # | Investigation | Stage attacked | Outcome |
+|---|---|---|---|
+| 1 | ArUco hull masks at feature extraction | SfM features | Negative — `heAICare/docs/three_way_masking_comparison.md` |
+| 2 | The same masks at stereo fusion | Fusion | Negative — [`fusion_masks_report.md`](fusion_masks_report.md) |
+| 3 | Poisson density trimming | Meshing | Negative — [`mesh_quality_report.md`](mesh_quality_report.md) |
+| 4 | Colour-based dense-cloud filter | Cropped cloud, pre-Poisson | **Positive, for this scene** — this report |
+
+The methodological result is in *why* the split falls where it does, and is set out in the
+Summary below: 1–3 each attacked the symptom at a stage where the contamination is not
+separable from genuine surface, and each failed for that same reason. 4 proved the source
+first (the T1 gate) and only then chose a stage — which is what changed the outcome.
+
+The success is **scene-specific**. It establishes that the membranes are removable
+contamination rather than Poisson hallucination, which is a real finding about their
+nature; it does not make the filter a general remedy. The generalisable fix is still
+capture-side, per `mesh_quality_report.md`. See also [`NEXT_STEPS.md`](NEXT_STEPS.md).
+
+---
+
 ## Summary
 
 The membranes are **dense-cloud contamination, not Poisson hallucination**, and they
