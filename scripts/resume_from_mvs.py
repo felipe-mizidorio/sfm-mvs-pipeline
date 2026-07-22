@@ -43,6 +43,12 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     recover_scale_details_safe,
 )
 from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
+from sfm_mvs_pipeline.scale.policy import (
+    UnscaledOutputError,
+    enforce_scale_policy,
+    resolve_scale_status,
+    unscaled_artifact_path,
+)
 from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
@@ -83,7 +89,7 @@ def _guard_against_double_scale(output_dir: Path) -> None:
         sys.exit(1)
 
 
-def main() -> None:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Re-fuse depth maps, SOR, crop to head sphere, scale recovery, Poisson + LCC."
     )
@@ -136,6 +142,16 @@ def main() -> None:
         "Scene-dependent: assumes a dark subject against pale contamination.",
     )
     parser.add_argument(
+        "--allow-unscaled",
+        action="store_true",
+        help="Continue even if metric scale recovery fails, writing output in "
+        "arbitrary SfM units. OFF by default: without this flag a failed scale "
+        "recovery is a hard stop, because the alternative is a complete, "
+        "plausible-looking mesh whose numbers are not millimetres. Artefacts "
+        "written under this flag are renamed to *.UNSCALED_sfm_units.* and the "
+        "manifest records scale.status 'unscaled'.",
+    )
+    parser.add_argument(
         "--membrane-pale-threshold",
         type=float,
         default=DEFAULT_PALE_THRESHOLD,
@@ -147,7 +163,11 @@ def main() -> None:
         default=DEFAULT_MARKER_MARGIN_MM,
         help="Protection margin added to each marker's own corner extent, in mm.",
     )
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
 
     with args.aruco_config.open() as f:
         aruco_cfg = yaml.safe_load(f).get("aruco", {})
@@ -246,6 +266,15 @@ def main() -> None:
         corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
     )
 
+    # Gate before the crop and the mesh: a failed scale recovery must not be
+    # able to produce a finished, metric-looking mesh by default.
+    scale_status = resolve_scale_status(scale_factor, scale_sanity)
+    try:
+        enforce_scale_policy(scale_status, allow_unscaled=args.allow_unscaled)
+    except UnscaledOutputError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+
     # --- Step 4: Post-fusion spherical crop (on SOR-filtered cloud) ---
     cropped_ply, crop_stats = run_head_crop(
         dense_filtered_ply,
@@ -289,6 +318,14 @@ def main() -> None:
             apply_scale_to_ply(ply, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
         logger.info("Applied scale %.6f mm/unit to outputs.", scale_factor)
+    else:
+        # Reached only under --allow-unscaled. Rename every artefact so a stray
+        # file cannot later be mistaken for metric output.
+        for ply in dict.fromkeys(
+            [dense_ply, dense_filtered_ply, cropped_ply, input_for_poisson]
+        ):
+            ply.rename(unscaled_artifact_path(ply))
+        mesh_ply = mesh_ply.rename(unscaled_artifact_path(mesh_ply))
 
     write_pipeline_manifest(
         output_dir,
@@ -299,6 +336,7 @@ def main() -> None:
         scale_factor,
         scale_sanity=scale_sanity,
         scale_self_consistency=scale_self_consistency,
+        scale_status=scale_status,
         provenance=with_membrane_filter_provenance(
             with_fusion_mask_provenance(
                 build_provenance(

@@ -33,6 +33,12 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     recover_scale_details_safe,
 )
 from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
+from sfm_mvs_pipeline.scale.policy import (
+    UnscaledOutputError,
+    enforce_scale_policy,
+    resolve_scale_status,
+    unscaled_artifact_path,
+)
 from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.feature_extraction import (
     camera_prior_from_manifest,
@@ -187,6 +193,16 @@ def _parse_args() -> argparse.Namespace:
         "it is SCENE-DEPENDENT: it assumes a dark subject against pale "
         "contamination and would delete the subject in a capture where the "
         "subject is pale. See docs/membrane_filter_report.md.",
+    )
+    parser.add_argument(
+        "--allow-unscaled",
+        action="store_true",
+        help="Continue even if metric scale recovery fails, writing output in "
+        "arbitrary SfM units. OFF by default: without this flag a failed scale "
+        "recovery is a hard stop, because the alternative is a complete, "
+        "plausible-looking mesh whose numbers are not millimetres. Artefacts "
+        "written under this flag are renamed to *.UNSCALED_sfm_units.* and the "
+        "manifest records scale.status 'unscaled'.",
     )
     parser.add_argument(
         "--membrane-pale-threshold",
@@ -385,6 +401,15 @@ def main() -> None:
         corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
     )
 
+    # Gate before the crop and the mesh: a failed scale recovery must not be
+    # able to produce a finished, metric-looking mesh by default.
+    scale_status = resolve_scale_status(scale_factor, scale_sanity)
+    try:
+        enforce_scale_policy(scale_status, allow_unscaled=args.allow_unscaled)
+    except UnscaledOutputError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+
     # --- Step 5c/7: Spherical crop to head region (auto-sized from ArUco) ---
     cropped_ply, crop_stats = run_head_crop(
         dense_filtered_ply,
@@ -424,6 +449,12 @@ def main() -> None:
         for ply in dict.fromkeys([dense_filtered_ply, cropped_ply, input_for_poisson]):
             apply_scale_to_ply(ply, scale_factor)
         apply_scale_to_mesh(mesh_ply, scale_factor)
+    else:
+        # Reached only under --allow-unscaled. Rename every artefact so a stray
+        # file cannot later be mistaken for metric output.
+        for ply in dict.fromkeys([dense_filtered_ply, cropped_ply, input_for_poisson]):
+            ply.rename(unscaled_artifact_path(ply))
+        mesh_ply = mesh_ply.rename(unscaled_artifact_path(mesh_ply))
 
     # --- Step 7/7: Pipeline manifest ---
     provenance = build_provenance(
@@ -450,6 +481,7 @@ def main() -> None:
         scale_factor,
         scale_sanity=scale_sanity,
         scale_self_consistency=scale_self_consistency,
+        scale_status=scale_status,
         provenance=provenance,
     )
 

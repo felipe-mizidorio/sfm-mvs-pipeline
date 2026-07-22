@@ -474,6 +474,7 @@ def write_pipeline_manifest(
     scale_factor: float | None,
     scale_sanity: dict | None = None,
     scale_self_consistency: dict | None = None,
+    scale_status: dict | None = None,
     provenance: dict | None = None,
 ) -> None:
     """Write pipeline_manifest.json to output_dir."""
@@ -491,6 +492,11 @@ def write_pipeline_manifest(
         "scale_factor_mm_per_unit": scale_factor,
         **lcc_stats,
     }
+    # Explicit, unmissable scale state. `scale_factor_mm_per_unit` above is kept
+    # for backwards compatibility, but a bare null there is easy to miss and
+    # cannot distinguish "recovered but never validated" from "validated".
+    if scale_status is not None:
+        manifest["scale"] = scale_status
     if scale_sanity is not None:
         manifest["scale_sanity_check"] = scale_sanity
     if scale_self_consistency is not None:
