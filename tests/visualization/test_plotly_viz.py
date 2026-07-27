@@ -1,6 +1,5 @@
 import numpy as np
 import open3d as o3d
-import pytest
 
 from sfm_mvs_pipeline.visualization.plotly_viz import save_mesh_html, save_point_cloud_html
 
