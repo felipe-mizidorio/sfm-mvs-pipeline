@@ -25,19 +25,22 @@ The pipeline covers the full reconstruction workflow from raw images to a dense 
 sfm-mvs-pipeline/
 ├── src/
 │   └── sfm_mvs_pipeline/
+│       ├── cli/          # Console entrypoints (run, resume_mvs, resume_dense)
 │       ├── sfm/          # Feature extraction, matching, bundle adjustment
 │       ├── mvs/          # Dense reconstruction (PatchMatch Stereo, fusion)
+│       ├── postprocess/  # Dense-cloud filtering (SOR, membrane filter)
+│       ├── pipeline/     # Shared post-fusion orchestration + manifest
 │       ├── mesh/         # Surface reconstruction (Poisson)
-│       ├── scale/        # ArUco-based metric scale recovery
-│       └── evaluation/   # 3D evaluation metrics
-├── scripts/              # Entrypoints to run the full pipeline
+│       ├── scale/        # ArUco-based metric scale recovery + scale policy
+│       ├── evaluation/   # 3D evaluation metrics
+│       └── visualization/ # Plotly HTML checkpoints
+├── tests/                # Mirrors src/ layout (one directory per package)
 ├── notebooks/            # Exploratory analysis and result visualisation
 ├── configs/              # YAML configuration files for COLMAP and pipeline stages
-├── data/                 # Not tracked by Git — managed with DVC
+├── data/                 # Folder skeleton tracked via .gitkeep; contents managed with DVC
 │   ├── raw/              # Original input images (never modified)
 │   ├── processed/        # Intermediate outputs per pipeline stage
 │   └── results/          # Final metrics and reports
-├── tests/
 ├── pyproject.toml
 └── README.md
 ```
@@ -92,10 +95,18 @@ uv sync --group notebook
 ## Running the Pipeline
 
 ```bash
-uv run python scripts/run_pipeline.py \
+uv run sfm-mvs-run \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene
 ```
+
+Two resume entrypoints skip the expensive early stages when re-running the
+post-fusion pipeline on an existing output directory:
+
+- `sfm-mvs-resume-mvs` — re-runs stereo fusion onward from an existing MVS workspace (depth maps).
+- `sfm-mvs-resume-dense` — resumes from an existing `dense.ply` (SOR → scale → Poisson).
+
+Each command is also runnable as a module, e.g. `uv run python -m sfm_mvs_pipeline.cli.run`.
 
 ### CLI Reference
 
@@ -144,7 +155,7 @@ The dense cloud is automatically cropped to a sphere around the head before mesh
 ### Example: sparse-only run on CPU
 
 ```bash
-uv run python scripts/run_pipeline.py \
+uv run sfm-mvs-run \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene \
   --device cpu \
@@ -154,7 +165,7 @@ uv run python scripts/run_pipeline.py \
 ### Example: full run with evaluation
 
 ```bash
-uv run python scripts/run_pipeline.py \
+uv run sfm-mvs-run \
   --image-dir data/raw/my_scene \
   --output-dir data/processed/my_scene \
   --ground-truth data/raw/my_scene_gt.ply
@@ -163,7 +174,7 @@ uv run python scripts/run_pipeline.py \
 ### Example: neonatal capture with known intrinsics and metric scale
 
 ```bash
-uv run python scripts/run_pipeline.py \
+uv run sfm-mvs-run \
   --image-dir data/raw/session_01/frames \
   --output-dir data/processed/session_01 \
   --camera-model OPENCV \
