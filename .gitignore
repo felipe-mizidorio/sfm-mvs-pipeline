@@ -220,7 +220,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Data Folder
-data/
+data/*
+!data/.gitkeep
 
 # Claude / superpowers
 CLAUDE.md
