@@ -1,9 +1,9 @@
 [project]
 name = "sfm-mvs-pipeline"
 version = "0.1.0"
-description = ""
+description = "A pipeline for Structure from Motion and Multi-View Stereo"
 authors = [
-    {name = "Your Name",email = "you@example.com"}
+    {name = "Felipe Merenda Izidorio",email = "felipemerenda1@gmail.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.12"
