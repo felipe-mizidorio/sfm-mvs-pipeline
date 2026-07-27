@@ -16,6 +16,11 @@ dependencies = [
     "plotly (>=6.7.0,<7.0.0)"
 ]
 
+[project.scripts]
+sfm-mvs-run = "sfm_mvs_pipeline.cli.run:main"
+sfm-mvs-resume-mvs = "sfm_mvs_pipeline.cli.resume_mvs:main"
+sfm-mvs-resume-dense = "sfm_mvs_pipeline.cli.resume_dense:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/sfm_mvs_pipeline"]
 

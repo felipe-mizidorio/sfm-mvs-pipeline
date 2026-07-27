@@ -18,7 +18,7 @@ def _write(tmp_path, scale_factor, scale_sanity):
     status = resolve_scale_status(scale_factor, scale_sanity)
     write_pipeline_manifest(
         tmp_path,
-        "run_pipeline.py",
+        "sfm-mvs-run",
         {},
         {},
         _MESH_OPTS,
@@ -55,7 +55,7 @@ def test_manifest_distinguishes_unvalidated_from_validated(tmp_path) -> None:
 
 def test_manifest_without_scale_status_is_unchanged(tmp_path) -> None:
     """Back-compat: callers that do not pass a status get the old manifest."""
-    write_pipeline_manifest(tmp_path, "run_pipeline.py", {}, {}, _MESH_OPTS, 61.71)
+    write_pipeline_manifest(tmp_path, "sfm-mvs-run", {}, {}, _MESH_OPTS, 61.71)
     manifest = json.loads((tmp_path / "pipeline_manifest.json").read_text())
 
     assert "scale" not in manifest

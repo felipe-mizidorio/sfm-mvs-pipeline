@@ -6,23 +6,16 @@ all that it defaults to OFF. A default flip here would silently restore the
 failure path the policy exists to close, without breaking any other test.
 """
 
-import importlib.util
+import importlib
 import sys
-from pathlib import Path
 
 import pytest
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_SCRIPTS = ["run_pipeline.py", "resume_from_mvs.py"]
+_SCRIPTS = ["sfm_mvs_pipeline.cli.run", "sfm_mvs_pipeline.cli.resume_mvs"]
 
 
 def _load_script(name: str):
-    path = _REPO_ROOT / "scripts" / name
-    spec = importlib.util.spec_from_file_location(f"_script_{path.stem}", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module(name)
 
 
 def _parse(module, argv: list[str]):

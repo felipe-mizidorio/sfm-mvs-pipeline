@@ -23,7 +23,7 @@ from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
 from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -108,7 +108,7 @@ def main() -> None:
 
     write_pipeline_manifest(
         output_dir,
-        "resume_from_dense.py",
+        "sfm-mvs-resume-dense",
         sor_stats,
         lcc_stats,
         mesh_cfg["poisson_surface_reconstruction"],

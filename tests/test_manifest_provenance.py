@@ -42,7 +42,7 @@ def test_write_pipeline_manifest_includes_provenance_and_sanity(tmp_path: Path):
 
     write_pipeline_manifest(
         tmp_path,
-        "run_pipeline.py",
+        "sfm-mvs-run",
         SOR_STATS,
         LCC_STATS,
         MESH_OPTS,
@@ -62,10 +62,10 @@ def test_write_pipeline_manifest_includes_provenance_and_sanity(tmp_path: Path):
 def test_write_pipeline_manifest_backward_compatible(tmp_path: Path):
     """Old call signature (no new kwargs) still works and keeps old keys."""
     write_pipeline_manifest(
-        tmp_path, "resume_from_dense.py", SOR_STATS, LCC_STATS, MESH_OPTS, None
+        tmp_path, "sfm-mvs-resume-dense", SOR_STATS, LCC_STATS, MESH_OPTS, None
     )
 
     data = json.loads((tmp_path / "pipeline_manifest.json").read_text())
-    assert data["run_script"] == "resume_from_dense.py"
+    assert data["run_script"] == "sfm-mvs-resume-dense"
     assert data["scale_factor_mm_per_unit"] is None
     assert "scale_sanity_check" not in data

@@ -47,7 +47,7 @@ from sfm_mvs_pipeline.sfm.feature_extraction import (
 from sfm_mvs_pipeline.sfm.feature_matching import match_features
 from sfm_mvs_pipeline.sfm.reconstruction import run_incremental_mapping
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -474,7 +474,7 @@ def main() -> None:
     )
     write_pipeline_manifest(
         output_dir,
-        "run_pipeline.py",
+        "sfm-mvs-run",
         sor_stats,
         lcc_stats,
         mesh_cfg["poisson_surface_reconstruction"],

@@ -150,7 +150,7 @@ def test_manifest_records_self_consistency_block(tmp_path):
 
     write_pipeline_manifest(
         tmp_path,
-        "run_pipeline.py",
+        "sfm-mvs-run",
         sor_stats,
         lcc_stats,
         mesh_opts,
@@ -169,7 +169,7 @@ def test_manifest_omits_block_when_none(tmp_path):
     mesh_opts = {"depth": 9, "scale": 1.1, "linear_fit": False}
 
     write_pipeline_manifest(
-        tmp_path, "run_pipeline.py", sor_stats, lcc_stats, mesh_opts, None
+        tmp_path, "sfm-mvs-run", sor_stats, lcc_stats, mesh_opts, None
     )
 
     data = json.loads((tmp_path / "pipeline_manifest.json").read_text())

@@ -531,17 +531,18 @@ def test_contiguous_blanket_limitation(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# --skip-fusion double-scale guard (resume_from_mvs.py)
+# --skip-fusion double-scale guard (sfm-mvs-resume-mvs)
 # ---------------------------------------------------------------------------
 
-_RESUME_SCRIPT = _REPO_ROOT / "scripts" / "resume_from_mvs.py"
+_RESUME_MODULE = "sfm_mvs_pipeline.cli.resume_mvs"
 
 
 def _run_resume_skip_fusion(output_dir: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [
             sys.executable,
-            str(_RESUME_SCRIPT),
+            "-m",
+            _RESUME_MODULE,
             "--output-dir",
             str(output_dir),
             "--image-dir",
@@ -557,7 +558,7 @@ def _run_resume_skip_fusion(output_dir: Path) -> subprocess.CompletedProcess:
 def test_skip_fusion_refuses_already_scaled_dense(tmp_path):
     (tmp_path / "pipeline_manifest.json").write_text(
         json.dumps(
-            {"run_script": "resume_from_mvs.py", "scale_factor_mm_per_unit": 123.4}
+            {"run_script": "sfm-mvs-resume-mvs", "scale_factor_mm_per_unit": 123.4}
         )
     )
     result = _run_resume_skip_fusion(tmp_path)
@@ -566,11 +567,11 @@ def test_skip_fusion_refuses_already_scaled_dense(tmp_path):
 
 
 def test_skip_fusion_allowed_after_run_pipeline(tmp_path):
-    # run_pipeline.py never scales dense.ply itself, so --skip-fusion is safe;
+    # sfm-mvs-run never scales dense.ply itself, so --skip-fusion is safe;
     # the guard must not trigger (the script then fails later on the missing
     # sparse model, which is expected in this bare tmp dir).
     (tmp_path / "pipeline_manifest.json").write_text(
-        json.dumps({"run_script": "run_pipeline.py", "scale_factor_mm_per_unit": 123.4})
+        json.dumps({"run_script": "sfm-mvs-run", "scale_factor_mm_per_unit": 123.4})
     )
     result = _run_resume_skip_fusion(tmp_path)
     assert "double-scale" not in result.stdout + result.stderr
