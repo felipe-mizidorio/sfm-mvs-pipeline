@@ -36,7 +36,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
     run_sor_and_visualize,
 )
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SCALE_MM_PER_UNIT = 100.0
 HEAD_RADIUS_UNITS = 0.6  # 60 mm
