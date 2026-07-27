@@ -31,7 +31,9 @@ def save_point_cloud_html(
         clrs = np.asarray(pcd.colors)
         if idx is not None:
             clrs = clrs[idx]
-        colors = [f"rgb({int(r*255)},{int(g*255)},{int(b*255)})" for r, g, b in clrs]
+        colors = [
+            f"rgb({int(r * 255)},{int(g * 255)},{int(b * 255)})" for r, g, b in clrs
+        ]
 
     fig = go.Figure(
         go.Scatter3d(
@@ -67,7 +69,9 @@ def save_mesh_html(
     colors = None
     if mesh.has_vertex_colors():
         clrs = np.asarray(mesh.vertex_colors)
-        colors = [f"rgb({int(r*255)},{int(g*255)},{int(b*255)})" for r, g, b in clrs]
+        colors = [
+            f"rgb({int(r * 255)},{int(g * 255)},{int(b * 255)})" for r, g, b in clrs
+        ]
 
     fig = go.Figure(
         go.Mesh3d(

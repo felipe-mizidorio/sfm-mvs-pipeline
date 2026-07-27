@@ -63,9 +63,7 @@ def test_no_layout_config_returns_none():
     corners = make_two_marker_scene(0.8)
     assert check_marker_layout(corners, 100.0, None) is None
     assert check_marker_layout(corners, 100.0, {}) is None
-    assert (
-        check_marker_layout(corners, 100.0, {"known_distances_mm": []}) is None
-    )
+    assert check_marker_layout(corners, 100.0, {"known_distances_mm": []}) is None
 
 
 def test_no_scale_returns_none():

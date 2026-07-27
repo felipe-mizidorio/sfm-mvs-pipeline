@@ -17,10 +17,17 @@ import numpy as np
 import open3d as o3d
 import pycolmap
 
-from sfm_mvs_pipeline.mesh.surface_reconstruction import _apply_lcc, _apply_taubin, _run_poisson
+from sfm_mvs_pipeline.mesh.surface_reconstruction import (
+    _apply_lcc,
+    _apply_taubin,
+    _run_poisson,
+)
 from sfm_mvs_pipeline.postprocess.membrane_filter import filter_membrane_points
 from sfm_mvs_pipeline.postprocess.point_cloud_filter import filter_point_cloud
-from sfm_mvs_pipeline.visualization.plotly_viz import save_mesh_html, save_point_cloud_html
+from sfm_mvs_pipeline.visualization.plotly_viz import (
+    save_mesh_html,
+    save_point_cloud_html,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +239,9 @@ def run_head_crop(
     cropped_ply = output_dir / "dense_filtered_cropped.ply"
     o3d.io.write_point_cloud(str(cropped_ply), pcd_crop)
     logger.info(
-        "Cropped dense cloud: %d points, saved to '%s'", len(pcd_crop.points), cropped_ply
+        "Cropped dense cloud: %d points, saved to '%s'",
+        len(pcd_crop.points),
+        cropped_ply,
     )
 
     crop_stats = {
@@ -318,7 +327,9 @@ def run_poisson_lcc_and_visualize(
     mesh = _apply_taubin(mesh, mesh_opts)
     smoothing_cfg = mesh_opts.get("taubin_smoothing", {})
     if smoothing_cfg and int(smoothing_cfg.get("iterations", 10)) > 0:
-        save_mesh_html(mesh, viz_dir / "mesh_after_taubin.html", "Mesh (after Taubin smoothing)")
+        save_mesh_html(
+            mesh, viz_dir / "mesh_after_taubin.html", "Mesh (after Taubin smoothing)"
+        )
 
     output_ply.parent.mkdir(parents=True, exist_ok=True)
     o3d.io.write_triangle_mesh(str(output_ply), mesh)
@@ -437,15 +448,21 @@ def run_membrane_filter(
             "Membrane filter requested but no triangulated ArUco markers are "
             "available to protect — skipping (marker faces are the scale anchor)."
         )
-        return input_ply, {"enabled": True, "applied": False,
-                          "skipped_reason": "no triangulated markers to protect"}
+        return input_ply, {
+            "enabled": True,
+            "applied": False,
+            "skipped_reason": "no triangulated markers to protect",
+        }
     if not scale_factor:
         logger.warning(
             "Membrane filter requested but no metric scale was recovered, so the "
             "millimetre marker margin cannot be converted to SfM units — skipping."
         )
-        return input_ply, {"enabled": True, "applied": False,
-                           "skipped_reason": "no scale factor for margin conversion"}
+        return input_ply, {
+            "enabled": True,
+            "applied": False,
+            "skipped_reason": "no scale factor for margin conversion",
+        }
 
     logger.info("=== Membrane filter (colour-based, marker-protected) ===")
     pcd = o3d.io.read_point_cloud(str(input_ply))

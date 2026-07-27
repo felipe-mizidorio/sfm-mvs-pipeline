@@ -2,7 +2,10 @@ import numpy as np
 import open3d as o3d
 import pytest
 
-from sfm_mvs_pipeline.mesh.surface_reconstruction import _apply_taubin, reconstruct_surface
+from sfm_mvs_pipeline.mesh.surface_reconstruction import (
+    _apply_taubin,
+    reconstruct_surface,
+)
 
 _MESH_OPTIONS = {
     "depth": 6,

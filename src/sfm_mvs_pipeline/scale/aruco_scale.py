@@ -89,7 +89,9 @@ def triangulate_marker_corners(
 
     for mid, obs in marker_obs.items():
         if len(obs) < min_views:
-            logger.debug("Marker %d: only %d views, need %d — skipping", mid, len(obs), min_views)
+            logger.debug(
+                "Marker %d: only %d views, need %d — skipping", mid, len(obs), min_views
+            )
             continue
 
         # Triangulate each of the 4 corners from all observation pairs.
@@ -152,7 +154,9 @@ def _scale_from_marker_corners(
 
         side_3d = float(np.median(side_lengths))
         scale = marker_length_mm / side_3d
-        logger.debug("Marker %d: side_3d=%.6f → scale=%.4f mm/unit", mid, side_3d, scale)
+        logger.debug(
+            "Marker %d: side_3d=%.6f → scale=%.4f mm/unit", mid, side_3d, scale
+        )
         scale_estimates.append(scale)
 
     if not scale_estimates:
@@ -302,6 +306,7 @@ def apply_scale_to_mesh(ply_path: Path, scale: float) -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _find_image(image_dir: Path, name: str) -> Path | None:
     """Locate an image by name under image_dir (handles nested paths)."""

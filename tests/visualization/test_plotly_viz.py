@@ -1,7 +1,10 @@
 import numpy as np
 import open3d as o3d
 
-from sfm_mvs_pipeline.visualization.plotly_viz import save_mesh_html, save_point_cloud_html
+from sfm_mvs_pipeline.visualization.plotly_viz import (
+    save_mesh_html,
+    save_point_cloud_html,
+)
 
 
 def _pcd(n: int = 50) -> o3d.geometry.PointCloud:

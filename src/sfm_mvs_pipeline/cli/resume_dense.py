@@ -40,8 +40,12 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--image-dir", required=True, type=Path)
     parser.add_argument("--frames-manifest", default=None, type=Path)
-    parser.add_argument("--aruco-config", default=_REPO_ROOT / "configs/aruco.yaml", type=Path)
-    parser.add_argument("--mesh-config", default=_REPO_ROOT / "configs/mesh.yaml", type=Path)
+    parser.add_argument(
+        "--aruco-config", default=_REPO_ROOT / "configs/aruco.yaml", type=Path
+    )
+    parser.add_argument(
+        "--mesh-config", default=_REPO_ROOT / "configs/mesh.yaml", type=Path
+    )
     args = parser.parse_args()
 
     with args.aruco_config.open() as f:
@@ -72,11 +76,16 @@ def main() -> None:
     if args.frames_manifest is not None:
         manifest_data = json.loads(args.frames_manifest.read_text())
         manifest_detections = manifest_data.get("marker_detections")
-        logger.info("Manifest loaded: %d pre-detected marker entries", len(manifest_detections or {}))
+        logger.info(
+            "Manifest loaded: %d pre-detected marker entries",
+            len(manifest_detections or {}),
+        )
 
     # SOR + visualization.
     logger.info("=== Point cloud filtering (SOR) ===")
-    dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
+    dense_filtered_ply, sor_stats = run_sor_and_visualize(
+        dense_ply, output_dir, filter_cfg
+    )
 
     # Scale recovery.
     marker_length_mm = aruco_cfg.get("marker_length_mm")
@@ -97,7 +106,10 @@ def main() -> None:
     # Poisson + LCC + visualization.
     logger.info("=== Poisson surface reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
-        dense_filtered_ply, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
+        dense_filtered_ply,
+        mesh_ply,
+        output_dir,
+        mesh_cfg["poisson_surface_reconstruction"],
     )
 
     # Scale is applied once per file, after meshing: scaling dense_filtered_ply

@@ -46,7 +46,9 @@ def test_scale_with_passing_layout_check_is_validated() -> None:
 
 
 def test_scale_with_failing_layout_check_is_failed_validation() -> None:
-    status = resolve_scale_status(61.71, {"status": "warning", "max_abs_residual_pct": 9.0})
+    status = resolve_scale_status(
+        61.71, {"status": "warning", "max_abs_residual_pct": 9.0}
+    )
 
     assert status["status"] == STATUS_FAILED_VALIDATION
     assert status["validated_against_known_distances"] is False
@@ -90,7 +92,9 @@ def test_strict_policy_allows_unvalidated_scale() -> None:
 
 def test_strict_policy_allows_failed_validation() -> None:
     """A suspect scale is loud in the manifest and logs, but is still metric."""
-    status = resolve_scale_status(61.71, {"status": "warning", "max_abs_residual_pct": 9.0})
+    status = resolve_scale_status(
+        61.71, {"status": "warning", "max_abs_residual_pct": 9.0}
+    )
 
     enforce_scale_policy(status, allow_unscaled=False)  # must not raise
 

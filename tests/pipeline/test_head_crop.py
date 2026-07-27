@@ -182,9 +182,10 @@ def test_auto_head_radius_from_markers():
     radius, clamp_info = auto_head_radius(HEAD_CENTER, markers, SCALE_MM_PER_UNIT)
     # median corner distance (~0.65 units, corners stick out tangentially)
     # + 100 mm margin, within clamps.
-    expected = float(
-        np.median(np.linalg.norm(markers - HEAD_CENTER, axis=1))
-    ) + HEAD_CROP_MARGIN_MM / SCALE_MM_PER_UNIT
+    expected = (
+        float(np.median(np.linalg.norm(markers - HEAD_CENTER, axis=1)))
+        + HEAD_CROP_MARGIN_MM / SCALE_MM_PER_UNIT
+    )
     assert radius == pytest.approx(expected, rel=1e-6)
     assert HEAD_CROP_MIN_RADIUS_MM / SCALE_MM_PER_UNIT <= radius
     assert radius <= HEAD_CROP_MAX_RADIUS_MM / SCALE_MM_PER_UNIT
@@ -328,9 +329,7 @@ def test_run_head_crop_records_clamp_sentinel(tmp_path):
     # centroid is ~the origin, so median distance ≈ 200 mm + 100 mm margin
     # exceeds HEAD_CROP_MAX_RADIUS_MM and must trip the "max" sentinel.
     angles = 2 * np.pi * np.arange(8) / 8
-    markers = np.column_stack(
-        [2.0 * np.cos(angles), 2.0 * np.sin(angles), np.zeros(8)]
-    )
+    markers = np.column_stack([2.0 * np.cos(angles), 2.0 * np.sin(angles), np.zeros(8)])
     _, stats = run_head_crop(
         ply,
         tmp_path,
@@ -429,7 +428,9 @@ def test_domestic_background_removed_end_to_end(scenario, tmp_path):
     assert len(mesh.vertices) > 1000, "final mesh suspiciously small — LCC red flag"
 
     extent = mesh.get_max_bound() - mesh.get_min_bound()
-    max_allowed = 2 * HEAD_RADIUS_UNITS * 1.35  # head diameter + Poisson/smoothing slack
+    max_allowed = (
+        2 * HEAD_RADIUS_UNITS * 1.35
+    )  # head diameter + Poisson/smoothing slack
     assert np.all(extent <= max_allowed), (
         f"[{scenario}] mesh bbox {extent} exceeds head-sized bound {max_allowed}: "
         "background survived into the final mesh"
@@ -456,7 +457,9 @@ def test_domestic_background_removed_end_to_end(scenario, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _make_contiguous_blanket(rng: np.random.Generator, r_outer: float = 2.0) -> np.ndarray:
+def _make_contiguous_blanket(
+    rng: np.random.Generator, r_outer: float = 2.0
+) -> np.ndarray:
     """Blanket plane the head physically rests on (z = -0.58 cuts the sphere).
 
     Sampled from the head-contact ring (r ≈ 0.153) outward at head-like point
@@ -468,9 +471,7 @@ def _make_contiguous_blanket(rng: np.random.Generator, r_outer: float = 2.0) -> 
     n = int(np.pi * (r_outer**2 - contact_r**2) / spacing**2)
     rr = np.sqrt(rng.uniform(contact_r**2, r_outer**2, size=n))
     th = rng.uniform(0, 2 * np.pi, size=n)
-    pts = np.column_stack(
-        [rr * np.cos(th), rr * np.sin(th), np.full(n, blanket_z)]
-    )
+    pts = np.column_stack([rr * np.cos(th), rr * np.sin(th), np.full(n, blanket_z)])
     return pts + rng.normal(scale=0.004, size=(n, 3))
 
 

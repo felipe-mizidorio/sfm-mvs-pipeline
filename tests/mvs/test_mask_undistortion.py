@@ -4,7 +4,10 @@ import numpy as np
 import pytest
 
 from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
-from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe, undistortion_maps
+from sfm_mvs_pipeline.mvs.mask_undistortion import (
+    undistort_masks_safe,
+    undistortion_maps,
+)
 from sfm_mvs_pipeline.pipeline.orchestration import with_fusion_mask_provenance
 
 _FUSION_OPTIONS = {
@@ -101,7 +104,9 @@ def test_fusion_receives_mask_path(mock_stereo_fusion, mock_fusion_opts, tmp_pat
 
 @patch("sfm_mvs_pipeline.mvs.fusion.pycolmap.StereoFusionOptions")
 @patch("sfm_mvs_pipeline.mvs.fusion.pycolmap.stereo_fusion")
-def test_fusion_mask_path_not_set_by_default(mock_stereo_fusion, mock_fusion_opts, tmp_path):
+def test_fusion_mask_path_not_set_by_default(
+    mock_stereo_fusion, mock_fusion_opts, tmp_path
+):
     mvs_path = tmp_path / "mvs"
     depth_maps_dir = mvs_path / "stereo" / "depth_maps"
     depth_maps_dir.mkdir(parents=True)
@@ -126,7 +131,9 @@ def test_fusion_mask_path_not_set_by_default(mock_stereo_fusion, mock_fusion_opt
 
 
 @patch("sfm_mvs_pipeline.mvs.mask_undistortion.undistort_masks")
-def test_unsupported_model_degrades_to_unmasked_instead_of_aborting(mock_undistort, tmp_path):
+def test_unsupported_model_degrades_to_unmasked_instead_of_aborting(
+    mock_undistort, tmp_path
+):
     # Warping runs after PatchMatch Stereo; raising would throw away the GPU stage.
     mock_undistort.side_effect = ValueError("Unsupported camera model: OPENCV_FISHEYE")
 

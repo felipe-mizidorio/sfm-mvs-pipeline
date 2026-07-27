@@ -96,9 +96,7 @@ def check_scale_self_consistency(
         if any(idx not in corners for idx in range(4)):
             n_skipped += 1
             continue
-        sides = [
-            float(np.linalg.norm(corners[a] - corners[b])) for a, b in _SIDE_PAIRS
-        ]
+        sides = [float(np.linalg.norm(corners[a] - corners[b])) for a, b in _SIDE_PAIRS]
         diagonals = [
             float(np.linalg.norm(corners[a] - corners[b])) for a, b in _DIAGONAL_PAIRS
         ]

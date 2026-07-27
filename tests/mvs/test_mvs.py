@@ -21,7 +21,9 @@ _FUSION_OPTIONS = {
 @patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.patch_match_stereo")
 @patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.PatchMatchOptions")
 @patch("sfm_mvs_pipeline.mvs.dense_reconstruction.pycolmap.undistort_images")
-def test_dense_reconstruction_runs(mock_undistort, mock_patch_match_opts, mock_pms, tmp_path):
+def test_dense_reconstruction_runs(
+    mock_undistort, mock_patch_match_opts, mock_pms, tmp_path
+):
     sparse_path = tmp_path / "sparse"
     sparse_path.mkdir()
     image_dir = tmp_path / "images"

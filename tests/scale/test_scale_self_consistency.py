@@ -15,9 +15,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import write_pipeline_manifest
 from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 
 
-def square_corners(
-    center: np.ndarray, side: float
-) -> dict[int, np.ndarray]:
+def square_corners(center: np.ndarray, side: float) -> dict[int, np.ndarray]:
     """Axis-aligned square marker corners around a center, in SfM units."""
     h = side / 2.0
     offsets = [(-h, -h, 0.0), (h, -h, 0.0), (h, h, 0.0), (-h, h, 0.0)]
@@ -29,8 +27,7 @@ MARKER_LENGTH_MM = 20.0
 
 def test_uniform_markers_report_zero_dispersion_and_sqrt2_diagonals():
     corners = {
-        mid: square_corners(np.array([mid * 1.0, 0.0, 0.0]), 0.4)
-        for mid in range(3)
+        mid: square_corners(np.array([mid * 1.0, 0.0, 0.0]), 0.4) for mid in range(3)
     }
 
     result = check_scale_self_consistency(corners, MARKER_LENGTH_MM)
@@ -60,8 +57,7 @@ def test_dispersed_scales_warn_and_flag_the_outlier_marker():
     # the implied per-marker scale (40 mm/unit vs ~58.8) is a >2-sigma outlier
     # and pushes the CV over the warn threshold.
     corners = {
-        mid: square_corners(np.array([mid * 1.0, 0.0, 0.0]), 0.34)
-        for mid in range(9)
+        mid: square_corners(np.array([mid * 1.0, 0.0, 0.0]), 0.34) for mid in range(9)
     }
     corners[9] = square_corners(np.array([9.0, 0.0, 0.0]), 0.5)
 
@@ -95,7 +91,9 @@ def test_folded_marker_flagged_by_diagonal_ratio():
     diag_block = result["diagonal_ratio"]
     assert diag_block["status"] == "warning"
     assert diag_block["flagged"] == [7]
-    assert abs(diag_block["per_marker"][7]["deviation_pct"]) > diag_block["tolerance_pct"]
+    assert (
+        abs(diag_block["per_marker"][7]["deviation_pct"]) > diag_block["tolerance_pct"]
+    )
 
 
 def test_incomplete_and_degenerate_markers_are_skipped():
@@ -143,8 +141,7 @@ def test_manifest_records_self_consistency_block(tmp_path):
     lcc_stats = {"lcc": {"triangles_kept": 100, "triangles_removed": 1}}
     mesh_opts = {"depth": 9, "scale": 1.1, "linear_fit": False}
     corners = {
-        mid: square_corners(np.array([mid * 1.0, 0.0, 0.0]), 0.4)
-        for mid in range(2)
+        mid: square_corners(np.array([mid * 1.0, 0.0, 0.0]), 0.4) for mid in range(2)
     }
     block = check_scale_self_consistency(corners, MARKER_LENGTH_MM)
 

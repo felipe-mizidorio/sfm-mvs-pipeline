@@ -49,7 +49,9 @@ def test_manifest_distinguishes_unvalidated_from_validated(tmp_path) -> None:
     assert validated["scale"]["validated_against_known_distances"] is True
 
     # Both carry the same scale factor, so the factor alone cannot tell them apart.
-    assert unvalidated["scale_factor_mm_per_unit"] == validated["scale_factor_mm_per_unit"]
+    assert (
+        unvalidated["scale_factor_mm_per_unit"] == validated["scale_factor_mm_per_unit"]
+    )
     assert unvalidated["scale"]["status"] != validated["scale"]["status"]
 
 

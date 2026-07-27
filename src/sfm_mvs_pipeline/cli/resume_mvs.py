@@ -96,9 +96,15 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--image-dir", required=True, type=Path)
     parser.add_argument("--frames-manifest", default=None, type=Path)
-    parser.add_argument("--aruco-config", default=_REPO_ROOT / "configs/aruco.yaml", type=Path)
-    parser.add_argument("--mesh-config", default=_REPO_ROOT / "configs/mesh.yaml", type=Path)
-    parser.add_argument("--colmap-config", default=_REPO_ROOT / "configs/colmap.yaml", type=Path)
+    parser.add_argument(
+        "--aruco-config", default=_REPO_ROOT / "configs/aruco.yaml", type=Path
+    )
+    parser.add_argument(
+        "--mesh-config", default=_REPO_ROOT / "configs/mesh.yaml", type=Path
+    )
+    parser.add_argument(
+        "--colmap-config", default=_REPO_ROOT / "configs/colmap.yaml", type=Path
+    )
     parser.add_argument(
         "--bbox-min",
         nargs=3,
@@ -223,7 +229,9 @@ def main() -> None:
     fusion_mask_dir: Path | None = None
     fusion_mask_stats: dict | None = None
     if args.skip_fusion:
-        logger.info("Skipping stereo fusion (--skip-fusion). Using existing '%s'.", dense_ply)
+        logger.info(
+            "Skipping stereo fusion (--skip-fusion). Using existing '%s'.", dense_ply
+        )
     else:
         if mask_path is not None:
             logger.info("=== Undistorting masks for stereo fusion ===")
@@ -246,7 +254,9 @@ def main() -> None:
 
     # --- Step 2: SOR on raw dense cloud ---
     logger.info("=== Point cloud filtering (SOR) ===")
-    dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
+    dense_filtered_ply, sor_stats = run_sor_and_visualize(
+        dense_ply, output_dir, filter_cfg
+    )
 
     # --- Step 3: Scale recovery (before the crop: the auto crop radius is
     # derived in millimetres and converted to SfM units via the scale) ---
@@ -302,7 +312,10 @@ def main() -> None:
     # --- Step 5: Poisson + LCC + visualization ---
     logger.info("=== Poisson surface reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
-        input_for_poisson, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
+        input_for_poisson,
+        mesh_ply,
+        output_dir,
+        mesh_cfg["poisson_surface_reconstruction"],
     )
 
     # --- Step 6: Apply metric scale once, after meshing ---

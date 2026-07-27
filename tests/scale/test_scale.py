@@ -20,12 +20,19 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _write_cube_pcd(path: Path) -> np.ndarray:
     """Write an 8-point unit-cube point cloud to path. Returns the points array."""
     pts = np.array(
         [
-            [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
-            [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1],
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 1, 0],
+            [1, 0, 1],
+            [0, 1, 1],
+            [1, 1, 1],
         ],
         dtype=np.float64,
     )
@@ -46,6 +53,7 @@ def _write_cube_mesh(path: Path) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # apply_scale_to_ply
 # ---------------------------------------------------------------------------
+
 
 def test_apply_scale_to_ply_doubles_coordinates(tmp_path):
     ply = tmp_path / "cloud.ply"
@@ -69,6 +77,7 @@ def test_apply_scale_to_ply_preserves_shape(tmp_path):
 # apply_scale_to_mesh
 # ---------------------------------------------------------------------------
 
+
 def test_apply_scale_to_mesh_doubles_vertices(tmp_path):
     ply = tmp_path / "mesh.ply"
     original = _write_cube_mesh(ply)
@@ -82,6 +91,7 @@ def test_apply_scale_to_mesh_doubles_vertices(tmp_path):
 # ---------------------------------------------------------------------------
 # recover_scale — synthetic reconstruction
 # ---------------------------------------------------------------------------
+
 
 def _make_mock_reconstruction(
     marker_world: np.ndarray,
@@ -159,7 +169,12 @@ def test_recover_scale_synthetic():
     # Marker corners in reconstruction units: 10-unit square at z=0.
     side_recon = 10.0
     marker_world = np.array(
-        [[0.0, 0.0, 0.0], [side_recon, 0.0, 0.0], [side_recon, side_recon, 0.0], [0.0, side_recon, 0.0]]
+        [
+            [0.0, 0.0, 0.0],
+            [side_recon, 0.0, 0.0],
+            [side_recon, side_recon, 0.0],
+            [0.0, side_recon, 0.0],
+        ]
     )
     # Physical side = 50 mm → scale = 50/10 = 5 mm/unit.
     marker_length_mm = 50.0
@@ -199,6 +214,7 @@ def test_recover_scale_no_markers_raises(tmp_path):
 # recover_scale_safe
 # ---------------------------------------------------------------------------
 
+
 def test_recover_scale_safe_returns_none_when_marker_length_falsy():
     mock_recon = MagicMock()
     with patch("sfm_mvs_pipeline.scale.aruco_scale.recover_scale") as mock_recover:
@@ -219,7 +235,12 @@ def test_recover_scale_safe_returns_factor_on_success():
     """End-to-end through the real triangulation path with synthetic geometry."""
     side_recon = 10.0
     marker_world = np.array(
-        [[0.0, 0.0, 0.0], [side_recon, 0.0, 0.0], [side_recon, side_recon, 0.0], [0.0, side_recon, 0.0]]
+        [
+            [0.0, 0.0, 0.0],
+            [side_recon, 0.0, 0.0],
+            [side_recon, side_recon, 0.0],
+            [0.0, side_recon, 0.0],
+        ]
     )
     marker_length_mm = 50.0
     expected_scale = marker_length_mm / side_recon
@@ -242,7 +263,12 @@ def test_recover_scale_and_markers_safe_returns_corner_points():
     """Marker corner positions (SfM units) come back alongside the factor."""
     side_recon = 10.0
     marker_world = np.array(
-        [[0.0, 0.0, 0.0], [side_recon, 0.0, 0.0], [side_recon, side_recon, 0.0], [0.0, side_recon, 0.0]]
+        [
+            [0.0, 0.0, 0.0],
+            [side_recon, 0.0, 0.0],
+            [side_recon, side_recon, 0.0],
+            [0.0, side_recon, 0.0],
+        ]
     )
     marker_length_mm = 50.0
     mock_recon, detections = _make_mock_reconstruction(

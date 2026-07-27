@@ -32,7 +32,9 @@ _SUPPORTED_MODELS = {
 }
 
 
-def _unpack_intrinsics(camera: pycolmap.Camera) -> tuple[float, float, float, float, list[float]]:
+def _unpack_intrinsics(
+    camera: pycolmap.Camera,
+) -> tuple[float, float, float, float, list[float]]:
     """Return (fx, fy, cx, cy, radial_ks) for a supported camera model."""
     model = camera.model.name
     p = [float(v) for v in camera.params]
@@ -101,7 +103,9 @@ def undistort_masks_safe(
     ``fusion_masks.enabled = false`` with the reason.
     """
     try:
-        return undistort_masks(mask_path, original_sparse_path, mvs_path, output_dir_name)
+        return undistort_masks(
+            mask_path, original_sparse_path, mvs_path, output_dir_name
+        )
     except (ValueError, OSError) as exc:
         logger.error(
             "Fusion mask undistortion FAILED (%s). Continuing with UNMASKED fusion — "

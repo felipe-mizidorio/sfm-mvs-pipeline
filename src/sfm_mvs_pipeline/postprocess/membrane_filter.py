@@ -151,17 +151,19 @@ def filter_membrane_points(
     keep_idx = np.flatnonzero(~to_remove)
     filtered = pcd.select_by_index(keep_idx)
 
-    stats.update({
-        "applied": True,
-        "points_after": int(len(filtered.points)),
-        "points_removed": int(to_remove.sum()),
-        "points_pale": int(is_pale.sum()),
-        "points_protected": int(protected.sum()),
-        "points_pale_protected": int((is_pale & protected).sum()),
-        "protection_radius_min": float(radii.min()),
-        "protection_radius_max": float(radii.max()),
-        "protection_radius_median": float(np.median(radii)),
-    })
+    stats.update(
+        {
+            "applied": True,
+            "points_after": int(len(filtered.points)),
+            "points_removed": int(to_remove.sum()),
+            "points_pale": int(is_pale.sum()),
+            "points_protected": int(protected.sum()),
+            "points_pale_protected": int((is_pale & protected).sum()),
+            "protection_radius_min": float(radii.min()),
+            "protection_radius_max": float(radii.max()),
+            "protection_radius_median": float(np.median(radii)),
+        }
+    )
     logger.info(
         "Membrane filter: removed %d of %d points (%.2f%%) — %d pale, of which "
         "%d were protected by %d marker sphere(s) (radius %.3f-%.3f).",

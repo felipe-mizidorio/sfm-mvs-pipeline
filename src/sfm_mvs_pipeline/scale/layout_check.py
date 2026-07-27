@@ -62,7 +62,12 @@ def check_marker_layout(
     for entry in layout_cfg["known_distances_mm"]:
         ids = list(entry.get("ids", []))
         expected_mm = entry.get("distance_mm")
-        if len(ids) != 2 or not expected_mm or ids[0] not in centers or ids[1] not in centers:
+        if (
+            len(ids) != 2
+            or not expected_mm
+            or ids[0] not in centers
+            or ids[1] not in centers
+        ):
             pairs.append({"ids": ids, "status": "unavailable"})
             continue
         measured_mm = float(

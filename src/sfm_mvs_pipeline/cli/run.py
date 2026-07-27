@@ -381,7 +381,9 @@ def main() -> None:
 
     # --- Step 5b/7: Point cloud filtering (SOR) + visualization ---
     logger.info("=== Step 5b/7: Point cloud filtering (SOR) ===")
-    dense_filtered_ply, sor_stats = run_sor_and_visualize(dense_ply, output_dir, filter_cfg)
+    dense_filtered_ply, sor_stats = run_sor_and_visualize(
+        dense_ply, output_dir, filter_cfg
+    )
 
     # --- Metric scale recovery (before the crop: the auto crop radius is
     # derived in millimetres and converted to SfM units via the scale) ---
@@ -437,7 +439,10 @@ def main() -> None:
     # --- Step 6/7: Poisson reconstruction + LCC + visualization ---
     logger.info("=== Step 6/7: Surface (Poisson) reconstruction + LCC ===")
     _, lcc_stats = run_poisson_lcc_and_visualize(
-        input_for_poisson, mesh_ply, output_dir, mesh_cfg["poisson_surface_reconstruction"]
+        input_for_poisson,
+        mesh_ply,
+        output_dir,
+        mesh_cfg["poisson_surface_reconstruction"],
     )
 
     # Scale is applied once per file, after meshing: scaling dense_filtered_ply

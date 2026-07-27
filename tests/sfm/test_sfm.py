@@ -88,7 +88,9 @@ class TestFeatureExtraction:
 
         assert captured["reader_options"].mask_path == mask_dir
 
-    def test_feature_extraction_no_mask_path_leaves_reader_options_default(self, tmp_path):
+    def test_feature_extraction_no_mask_path_leaves_reader_options_default(
+        self, tmp_path
+    ):
         image_dir = tmp_path / "images"
         image_dir.mkdir()
         _place_images(image_dir)
@@ -182,7 +184,9 @@ class TestFeatureMatching:
         with patch("pycolmap.match_exhaustive") as mock_fn:
             match_features(database_path, _MATCHING_OPTIONS)
 
-        mock_fn.assert_called_once_with(database_path=database_path, device=pycolmap.Device.auto)
+        mock_fn.assert_called_once_with(
+            database_path=database_path, device=pycolmap.Device.auto
+        )
 
     def test_feature_matching_unknown_method_raises(self, tmp_path):
         database_path = tmp_path / "colmap.db"
@@ -200,8 +204,10 @@ class TestFeatureMatching:
             "sequential": {"overlap": 5},
         }
         mock_pairing = MagicMock()
-        with patch("pycolmap.match_sequential") as mock_fn, \
-             patch("pycolmap.SequentialPairingOptions", return_value=mock_pairing):
+        with (
+            patch("pycolmap.match_sequential") as mock_fn,
+            patch("pycolmap.SequentialPairingOptions", return_value=mock_pairing),
+        ):
             match_features(database_path, options, pycolmap.Device.cpu)
         mock_fn.assert_called_once_with(
             database_path=database_path,
@@ -215,8 +221,10 @@ class TestFeatureMatching:
         database_path.touch()
         options = {"method": "sequential"}  # no sequential sub-key
         mock_pairing = MagicMock()
-        with patch("pycolmap.match_sequential") as mock_fn, \
-             patch("pycolmap.SequentialPairingOptions", return_value=mock_pairing):
+        with (
+            patch("pycolmap.match_sequential") as mock_fn,
+            patch("pycolmap.SequentialPairingOptions", return_value=mock_pairing),
+        ):
             match_features(database_path, options, pycolmap.Device.cpu)
         mock_fn.assert_called_once()
         assert mock_pairing.overlap == 5  # default when key absent
