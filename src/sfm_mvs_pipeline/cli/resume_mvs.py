@@ -31,8 +31,8 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
     run_head_crop,
     run_membrane_filter,
-    run_poisson_lcc_and_visualize,
-    run_sor_and_visualize,
+    run_poisson_lcc,
+    run_sor,
     with_fusion_mask_provenance,
     with_membrane_filter_provenance,
     write_pipeline_manifest,
@@ -254,9 +254,7 @@ def main() -> None:
 
     # --- Step 2: SOR on raw dense cloud ---
     logger.info("=== Point cloud filtering (SOR) ===")
-    dense_filtered_ply, sor_stats = run_sor_and_visualize(
-        dense_ply, output_dir, filter_cfg
-    )
+    dense_filtered_ply, sor_stats = run_sor(dense_ply, output_dir, filter_cfg)
 
     # --- Step 3: Scale recovery (before the crop: the auto crop radius is
     # derived in millimetres and converted to SfM units via the scale) ---
@@ -309,9 +307,9 @@ def main() -> None:
             scale_factor=scale_factor,
         )
 
-    # --- Step 5: Poisson + LCC + visualization ---
+    # --- Step 5: Poisson + LCC ---
     logger.info("=== Poisson surface reconstruction + LCC ===")
-    _, lcc_stats = run_poisson_lcc_and_visualize(
+    _, lcc_stats = run_poisson_lcc(
         input_for_poisson,
         mesh_ply,
         output_dir,

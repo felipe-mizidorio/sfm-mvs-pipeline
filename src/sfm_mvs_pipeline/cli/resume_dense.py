@@ -10,8 +10,8 @@ import yaml
 
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
-    run_poisson_lcc_and_visualize,
-    run_sor_and_visualize,
+    run_poisson_lcc,
+    run_sor,
     write_pipeline_manifest,
 )
 from sfm_mvs_pipeline.scale.aruco_scale import (
@@ -81,11 +81,9 @@ def main() -> None:
             len(manifest_detections or {}),
         )
 
-    # SOR + visualization.
+    # SOR.
     logger.info("=== Point cloud filtering (SOR) ===")
-    dense_filtered_ply, sor_stats = run_sor_and_visualize(
-        dense_ply, output_dir, filter_cfg
-    )
+    dense_filtered_ply, sor_stats = run_sor(dense_ply, output_dir, filter_cfg)
 
     # Scale recovery.
     marker_length_mm = aruco_cfg.get("marker_length_mm")
@@ -103,9 +101,9 @@ def main() -> None:
     scale_self_consistency = check_scale_self_consistency(
         corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
     )
-    # Poisson + LCC + visualization.
+    # Poisson + LCC.
     logger.info("=== Poisson surface reconstruction + LCC ===")
-    _, lcc_stats = run_poisson_lcc_and_visualize(
+    _, lcc_stats = run_poisson_lcc(
         dense_filtered_ply,
         mesh_ply,
         output_dir,

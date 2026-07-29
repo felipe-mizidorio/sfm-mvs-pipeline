@@ -36,8 +36,7 @@ sfm-mvs-pipeline/
 │       ├── pipeline/     # Shared post-fusion orchestration + manifest
 │       ├── mesh/         # Surface reconstruction (Poisson)
 │       ├── scale/        # ArUco-based metric scale recovery + scale policy
-│       ├── evaluation/   # 3D evaluation metrics
-│       └── visualization/ # Plotly HTML checkpoints
+│       └── evaluation/   # 3D evaluation metrics
 ├── tests/                # Mirrors src/ layout (one directory per package)
 ├── configs/              # YAML configuration files for COLMAP and pipeline stages
 ├── data/                 # Folder skeleton tracked via .gitkeep; contents managed with DVC
@@ -282,8 +281,9 @@ Two warn-only quality checks are recorded alongside it: `scale_sanity_check` (tr
 | `<output-dir>/dense_filtered.ply` | Dense cloud after SOR |
 | `<output-dir>/dense_filtered_cropped.ply` | After the spherical head crop |
 | `<output-dir>/dense_filtered_cropped_membrane.ply` | After the membrane filter (only with `--membrane-filter`) |
-| `<output-dir>/mesh.ply` | Final reconstructed mesh |
-| `<output-dir>/visualizations/*.html` | Plotly checkpoints (dense raw/after SOR, mesh before/after LCC, after Taubin) |
+| `<output-dir>/mesh_before_lcc.ply` | Raw Poisson mesh (before density trim / LCC) |
+| `<output-dir>/mesh_after_lcc.ply` | After largest-connected-component trim (before Taubin) |
+| `<output-dir>/mesh.ply` | Final reconstructed mesh (after Taubin smoothing) |
 | `<output-dir>/pipeline_manifest.json` | Resolved configs, library versions, per-stage counts, scale status, non-determinism notes |
 | `<output-dir>/results/metrics.json` | Evaluation metrics (if `--ground-truth` provided) |
 

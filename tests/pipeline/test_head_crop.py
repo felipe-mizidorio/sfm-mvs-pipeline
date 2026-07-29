@@ -32,8 +32,8 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
     crop_to_sphere,
     estimate_head_center,
     run_head_crop,
-    run_poisson_lcc_and_visualize,
-    run_sor_and_visualize,
+    run_poisson_lcc,
+    run_sor,
 )
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -396,7 +396,7 @@ def test_domestic_background_removed_end_to_end(scenario, tmp_path):
     mesh_cfg = yaml.safe_load((_REPO_ROOT / "configs/mesh.yaml").read_text())
 
     # SOR (real config values)
-    dense_filtered_ply, sor_stats = run_sor_and_visualize(
+    dense_filtered_ply, sor_stats = run_sor(
         dense_ply, tmp_path, mesh_cfg["point_cloud_filtering"]
     )
 
@@ -418,7 +418,7 @@ def test_domestic_background_removed_end_to_end(scenario, tmp_path):
     assert crop_stats["head_crop"]["points_after"] < len(head) + 0.5 * len(clutter)
 
     # Poisson → density trim → LCC → Taubin (real config values)
-    mesh, lcc_stats = run_poisson_lcc_and_visualize(
+    mesh, lcc_stats = run_poisson_lcc(
         input_for_poisson,
         tmp_path / "mesh.ply",
         tmp_path,
@@ -502,7 +502,7 @@ def test_contiguous_blanket_limitation(tmp_path):
     _write_cloud(np.vstack([head, blanket]), dense_ply)
 
     mesh_cfg = yaml.safe_load((_REPO_ROOT / "configs/mesh.yaml").read_text())
-    dense_filtered_ply, _ = run_sor_and_visualize(
+    dense_filtered_ply, _ = run_sor(
         dense_ply, tmp_path, mesh_cfg["point_cloud_filtering"]
     )
     input_for_poisson, crop_stats = run_head_crop(
@@ -516,7 +516,7 @@ def test_contiguous_blanket_limitation(tmp_path):
     # The crop itself works (auto radius, most of the blanket removed) …
     assert crop_stats["head_crop"]["radius_source"] == "aruco_auto"
 
-    mesh, _ = run_poisson_lcc_and_visualize(
+    mesh, _ = run_poisson_lcc(
         input_for_poisson,
         tmp_path / "mesh.ply",
         tmp_path,

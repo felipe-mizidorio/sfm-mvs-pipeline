@@ -1,8 +1,9 @@
 """Shared post-processing helpers used by all pipeline entry-point scripts.
 
-Orchestrates SOR → visualize → Poisson → LCC → Taubin → visualize and writes
-pipeline_manifest.json. Each script calls these functions after stereo fusion,
-inserting scale recovery in between (which is script-specific).
+Orchestrates SOR → Poisson → LCC → Taubin and writes pipeline_manifest.json.
+Each stage saves its output as a PLY so it can be inspected in a 3D viewer.
+Each script calls these functions after stereo fusion, inserting scale recovery
+in between (which is script-specific).
 """
 
 import datetime
@@ -24,10 +25,6 @@ from sfm_mvs_pipeline.mesh.surface_reconstruction import (
 )
 from sfm_mvs_pipeline.postprocess.membrane_filter import filter_membrane_points
 from sfm_mvs_pipeline.postprocess.point_cloud_filter import filter_point_cloud
-from sfm_mvs_pipeline.visualization.plotly_viz import (
-    save_mesh_html,
-    save_point_cloud_html,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -258,21 +255,18 @@ def run_head_crop(
     return cropped_ply, crop_stats
 
 
-def run_sor_and_visualize(
+def run_sor(
     input_ply: Path,
     output_dir: Path,
     filter_opts: dict,
 ) -> tuple[Path, dict]:
-    """Run SOR on input_ply, save filtered PLY to output_dir, write two HTML checkpoints.
+    """Run SOR on input_ply, save filtered PLY to output_dir.
 
     Returns:
         (dense_filtered_ply, sor_stats) where sor_stats contains point counts
         for inclusion in pipeline_manifest.json.
     """
-    viz_dir = output_dir / "visualizations"
-
     pcd_raw = o3d.io.read_point_cloud(str(input_ply))
-    save_point_cloud_html(pcd_raw, viz_dir / "dense_raw.html", "Dense cloud (raw)")
 
     dense_filtered_ply = output_dir / "dense_filtered.ply"
     pcd_filtered = filter_point_cloud(
@@ -280,9 +274,6 @@ def run_sor_and_visualize(
         dense_filtered_ply,
         filter_opts["nb_neighbors"],
         filter_opts["std_ratio"],
-    )
-    save_point_cloud_html(
-        pcd_filtered, viz_dir / "dense_after_sor.html", "Dense cloud (after SOR)"
     )
 
     sor_stats = {
@@ -297,39 +288,35 @@ def run_sor_and_visualize(
     return dense_filtered_ply, sor_stats
 
 
-def run_poisson_lcc_and_visualize(
+def run_poisson_lcc(
     input_ply: Path,
     output_ply: Path,
     output_dir: Path,
     mesh_opts: dict,
 ) -> tuple[o3d.geometry.TriangleMesh, dict]:
-    """Poisson + density trim + LCC + Taubin smoothing, with HTML checkpoints.
+    """Poisson + density trim + LCC + Taubin smoothing.
 
-    Saves visualizations: mesh_before_lcc.html, mesh_after_lcc.html,
-    mesh_after_taubin.html (skipped if taubin_smoothing not configured).
+    Saves the two intermediate meshes (mesh_before_lcc.ply, mesh_after_lcc.ply)
+    to output_dir so each stage can be inspected in a 3D viewer; the final
+    Taubin-smoothed mesh is written to output_ply.
 
     Returns:
         (final_mesh, lcc_stats) where lcc_stats contains triangle counts
         for inclusion in pipeline_manifest.json.
     """
-    viz_dir = output_dir / "visualizations"
-
     pcd = o3d.io.read_point_cloud(str(input_ply))
     if len(pcd.points) == 0:
         raise ValueError(f"Point cloud '{input_ply}' is empty.")
 
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     pre_lcc_mesh = _run_poisson(pcd, mesh_opts)
-    save_mesh_html(pre_lcc_mesh, viz_dir / "mesh_before_lcc.html", "Mesh (before LCC)")
+    o3d.io.write_triangle_mesh(str(output_dir / "mesh_before_lcc.ply"), pre_lcc_mesh)
 
     mesh, lcc_stats = _apply_lcc(pre_lcc_mesh, mesh_opts)
-    save_mesh_html(mesh, viz_dir / "mesh_after_lcc.html", "Mesh (after LCC)")
+    o3d.io.write_triangle_mesh(str(output_dir / "mesh_after_lcc.ply"), mesh)
 
     mesh = _apply_taubin(mesh, mesh_opts)
-    smoothing_cfg = mesh_opts.get("taubin_smoothing", {})
-    if smoothing_cfg and int(smoothing_cfg.get("iterations", 10)) > 0:
-        save_mesh_html(
-            mesh, viz_dir / "mesh_after_taubin.html", "Mesh (after Taubin smoothing)"
-        )
 
     output_ply.parent.mkdir(parents=True, exist_ok=True)
     o3d.io.write_triangle_mesh(str(output_ply), mesh)
