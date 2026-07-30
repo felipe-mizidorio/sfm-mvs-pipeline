@@ -14,6 +14,7 @@ from sfm_mvs_pipeline.pipeline.orchestration import (
     run_sor,
     with_fusion_mask_provenance,
 )
+from sfm_mvs_pipeline.scale.policy import UnscaledOutputError
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -101,20 +102,24 @@ def main() -> None:
     )
     with_fusion_mask_provenance(provenance, enabled=False)
 
-    run_post_fusion(
-        output_dir=output_dir,
-        run_script="sfm-mvs-resume-dense",
-        reconstruction=reconstruction,
-        image_dir=args.image_dir,
-        aruco_cfg=aruco_cfg,
-        mesh_cfg=mesh_cfg,
-        dense_filtered_ply=dense_filtered_ply,
-        sor_stats=sor_stats,
-        mesh_ply=mesh_ply,
-        provenance=provenance,
-        manifest_detections=manifest_detections,
-        allow_unscaled=args.allow_unscaled,
-    )
+    try:
+        run_post_fusion(
+            output_dir=output_dir,
+            run_script="sfm-mvs-resume-dense",
+            reconstruction=reconstruction,
+            image_dir=args.image_dir,
+            aruco_cfg=aruco_cfg,
+            mesh_cfg=mesh_cfg,
+            dense_filtered_ply=dense_filtered_ply,
+            sor_stats=sor_stats,
+            mesh_ply=mesh_ply,
+            provenance=provenance,
+            manifest_detections=manifest_detections,
+            allow_unscaled=args.allow_unscaled,
+        )
+    except UnscaledOutputError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
 
     logger.info("Resume complete. Outputs in '%s'", output_dir)
 

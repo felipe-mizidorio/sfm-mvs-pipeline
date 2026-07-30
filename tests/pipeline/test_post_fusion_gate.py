@@ -14,7 +14,11 @@ import pytest
 
 from sfm_mvs_pipeline.pipeline import orchestration
 from sfm_mvs_pipeline.pipeline.orchestration import build_provenance, run_post_fusion
-from sfm_mvs_pipeline.scale.policy import STATUS_UNSCALED, UNSCALED_MARKER
+from sfm_mvs_pipeline.scale.policy import (
+    STATUS_UNSCALED,
+    UNSCALED_MARKER,
+    UnscaledOutputError,
+)
 
 MESH_CFG = {
     "poisson_surface_reconstruction": {"depth": 9, "scale": 1.1, "linear_fit": False}
@@ -51,7 +55,9 @@ def _run_post_fusion(tmp_path: Path, *, allow_unscaled: bool) -> Path:
 
 
 def test_post_fusion_hard_stops_when_unscaled_and_not_opted_in(tmp_path: Path):
-    with pytest.raises(SystemExit):
+    # The backbone is a library function: it raises rather than exiting the
+    # process. Turning this into sys.exit(1) is the CLI main()'s job.
+    with pytest.raises(UnscaledOutputError):
         _run_post_fusion(tmp_path, allow_unscaled=False)
 
     # No mesh is written on the hard stop.
@@ -70,3 +76,53 @@ def test_post_fusion_marks_artefacts_and_manifest_when_opted_in(tmp_path: Path):
     data = json.loads((tmp_path / "pipeline_manifest.json").read_text())
     assert data["scale"]["status"] == STATUS_UNSCALED
     assert data["scale_factor_mm_per_unit"] is None
+
+
+def test_post_fusion_scales_each_unique_target_once(tmp_path: Path):
+    """On the scaled path, every unique PLY is scaled exactly once and the mesh
+    once — the dict.fromkeys de-dup must not double-apply or skip a file, even
+    when the crop output aliases the SOR cloud and extra_scale_plys is passed."""
+    dense_ply = tmp_path / "dense.ply"
+    dense_ply.write_text("ply")
+    dense_filtered = tmp_path / "dense_filtered.ply"
+    dense_filtered.write_text("ply")
+    mesh_ply = tmp_path / "mesh.ply"
+    mesh_ply.write_text("ply")
+    scale = 0.5
+
+    with (
+        # Non-None scale → the scaled branch (not the unscaled rename branch).
+        patch.object(
+            orchestration,
+            "recover_scale_details_safe",
+            return_value=(scale, None, {}),
+        ),
+        # Crop returns the SOR cloud unchanged (skip-crop aliasing) so the
+        # target list has a duplicate for dict.fromkeys to collapse.
+        patch.object(orchestration, "run_head_crop", return_value=(dense_filtered, {})),
+        patch.object(
+            orchestration, "run_poisson_lcc", return_value=(None, {"lcc": {}})
+        ),
+        patch.object(orchestration, "apply_scale_to_ply") as apply_ply,
+        patch.object(orchestration, "apply_scale_to_mesh") as apply_mesh,
+    ):
+        run_post_fusion(
+            output_dir=tmp_path,
+            run_script="sfm-mvs-resume-mvs",
+            reconstruction=MagicMock(),
+            image_dir=tmp_path,
+            aruco_cfg={"marker_length_mm": 20.0},
+            mesh_cfg=MESH_CFG,
+            dense_filtered_ply=dense_filtered,
+            sor_stats={"point_cloud_filtering": {}},
+            mesh_ply=mesh_ply,
+            provenance=build_provenance(None, {}),
+            extra_scale_plys=[dense_ply],
+        )
+
+    # Two unique clouds (dense.ply + dense_filtered.ply); the aliased crop and
+    # Poisson input collapse. Each scaled once, mesh scaled once.
+    scaled = [call.args[0] for call in apply_ply.call_args_list]
+    assert sorted(scaled) == sorted({dense_ply, dense_filtered})
+    assert apply_ply.call_count == 2
+    apply_mesh.assert_called_once_with(mesh_ply, scale)

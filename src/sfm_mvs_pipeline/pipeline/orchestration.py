@@ -11,7 +11,6 @@ import hashlib
 import json
 import logging
 import platform
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -38,7 +37,6 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
 )
 from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
 from sfm_mvs_pipeline.scale.policy import (
-    UnscaledOutputError,
     enforce_scale_policy,
     resolve_scale_status,
     unscaled_artifact_path,
@@ -518,9 +516,11 @@ def run_post_fusion(
     ``extra_scale_plys`` written earlier that must be scaled/renamed alongside
     the standard clouds (e.g. the raw ``dense.ply`` for the resume-from-MVS run).
 
-    The scale gate (`enforce_scale_policy`) exits the process on a hard stop, so
-    a failed scale recovery cannot produce a finished, metric-looking mesh
-    unless the caller passed ``allow_unscaled``.
+    The scale gate (`enforce_scale_policy`) raises ``UnscaledOutputError`` on a
+    hard stop, so a failed scale recovery cannot produce a finished,
+    metric-looking mesh unless the caller passed ``allow_unscaled``. Turning
+    that into a process exit is the CLI ``main()``'s job, not this library
+    function's.
 
     Returns:
         The final mesh path — the same ``mesh_ply``, or its
@@ -547,11 +547,7 @@ def run_post_fusion(
     # Gate before the crop and the mesh: a failed scale recovery must not be
     # able to produce a finished, metric-looking mesh by default.
     scale_status = resolve_scale_status(scale_factor, scale_sanity)
-    try:
-        enforce_scale_policy(scale_status, allow_unscaled=allow_unscaled)
-    except UnscaledOutputError as exc:
-        logger.error("%s", exc)
-        sys.exit(1)
+    enforce_scale_policy(scale_status, allow_unscaled=allow_unscaled)
 
     # --- Spherical crop to head region (auto-sized from ArUco) ---
     cropped_ply, crop_stats = run_head_crop(
@@ -562,7 +558,8 @@ def run_post_fusion(
         scale_factor=scale_factor,
         marker_points=marker_points,
     )
-    sor_stats.update(crop_stats)
+    # Merge into a local dict rather than mutating the caller-owned sor_stats.
+    stats = {**sor_stats, **crop_stats}
 
     # --- Optional membrane filter (opt-in, off by default) ---
     input_for_poisson = cropped_ply
@@ -605,13 +602,13 @@ def run_post_fusion(
             ply.rename(unscaled_artifact_path(ply))
         mesh_ply = mesh_ply.rename(unscaled_artifact_path(mesh_ply))
 
-    with_membrane_filter_provenance(
+    provenance = with_membrane_filter_provenance(
         provenance, enabled=membrane_filter, stats=membrane_stats
     )
     write_pipeline_manifest(
         output_dir,
         run_script,
-        sor_stats,
+        stats,
         lcc_stats,
         mesh_cfg["poisson_surface_reconstruction"],
         scale_factor,

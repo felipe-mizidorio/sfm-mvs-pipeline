@@ -100,7 +100,7 @@ Two resume entrypoints skip the expensive early stages when re-running the
 post-fusion pipeline on an existing output directory:
 
 - `sfm-mvs-resume-mvs` — re-runs stereo fusion onward from an existing MVS workspace (depth maps).
-- `sfm-mvs-resume-dense` — resumes from an existing `dense.ply` (SOR → scale → Poisson).
+- `sfm-mvs-resume-dense` — resumes from an existing `dense.ply` (SOR → scale → crop → Poisson).
 
 Each command is also runnable as a module, e.g. `uv run python -m sfm_mvs_pipeline.cli.run`.
 
@@ -184,7 +184,7 @@ uv run sfm-mvs-resume-mvs \
 
 ### `sfm-mvs-resume-dense` reference
 
-Resumes from an existing `<output-dir>/dense.ply`: SOR → scale recovery → Poisson + LCC. Accepts `--output-dir`, `--image-dir`, `--frames-manifest`, `--aruco-config`, and `--mesh-config`. It performs no head crop and does not enforce the scale policy — an unrecoverable scale leaves the output in SfM units with `scale_factor_mm_per_unit: null` in the manifest.
+Resumes from an existing `<output-dir>/dense.ply`: SOR → scale recovery → head crop → Poisson + LCC. Accepts `--output-dir`, `--image-dir`, `--frames-manifest`, `--aruco-config`, and `--mesh-config`. Like the other two entrypoints, it applies the auto-sized [head crop](#head-crop) and enforces the [scale policy](#metric-scale-policy): an unrecoverable scale hard-stops unless you pass `--allow-unscaled`, which finishes the run with `UNSCALED_sfm_units`-marked artefacts and `scale_factor_mm_per_unit: null` in the manifest.
 
 ```bash
 uv run sfm-mvs-resume-dense \

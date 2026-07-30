@@ -23,6 +23,7 @@ from sfm_mvs_pipeline.postprocess.membrane_filter import (
     DEFAULT_MARKER_MARGIN_MM,
     DEFAULT_PALE_THRESHOLD,
 )
+from sfm_mvs_pipeline.scale.policy import UnscaledOutputError
 from sfm_mvs_pipeline.sfm.feature_extraction import (
     camera_prior_from_manifest,
     extract_features,
@@ -382,24 +383,28 @@ def main() -> None:
     )
 
     # --- Steps 5c–7/7: scale gate → crop → membrane → Poisson → manifest ---
-    mesh_ply = run_post_fusion(
-        output_dir=output_dir,
-        run_script="sfm-mvs-run",
-        reconstruction=reconstructions[best_model_idx],
-        image_dir=args.image_dir,
-        aruco_cfg=aruco_cfg,
-        mesh_cfg=mesh_cfg,
-        dense_filtered_ply=dense_filtered_ply,
-        sor_stats=sor_stats,
-        mesh_ply=mesh_ply,
-        provenance=provenance,
-        manifest_detections=manifest_detections,
-        head_radius_override=args.head_radius,
-        allow_unscaled=args.allow_unscaled,
-        membrane_filter=args.membrane_filter,
-        membrane_pale_threshold=args.membrane_pale_threshold,
-        membrane_marker_margin_mm=args.membrane_marker_margin_mm,
-    )
+    try:
+        mesh_ply = run_post_fusion(
+            output_dir=output_dir,
+            run_script="sfm-mvs-run",
+            reconstruction=reconstructions[best_model_idx],
+            image_dir=args.image_dir,
+            aruco_cfg=aruco_cfg,
+            mesh_cfg=mesh_cfg,
+            dense_filtered_ply=dense_filtered_ply,
+            sor_stats=sor_stats,
+            mesh_ply=mesh_ply,
+            provenance=provenance,
+            manifest_detections=manifest_detections,
+            head_radius_override=args.head_radius,
+            allow_unscaled=args.allow_unscaled,
+            membrane_filter=args.membrane_filter,
+            membrane_pale_threshold=args.membrane_pale_threshold,
+            membrane_marker_margin_mm=args.membrane_marker_margin_mm,
+        )
+    except UnscaledOutputError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
 
     # --- Optional: Evaluation ---
     if args.ground_truth is not None:
