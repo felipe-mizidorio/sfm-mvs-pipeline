@@ -11,8 +11,7 @@ from sfm_mvs_pipeline.scale.aruco_scale import (
     apply_scale_to_mesh,
     apply_scale_to_ply,
     recover_scale,
-    recover_scale_and_markers_safe,
-    recover_scale_safe,
+    recover_scale_details_safe,
 )
 
 
@@ -211,27 +210,26 @@ def test_recover_scale_no_markers_raises(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# recover_scale_safe
+# recover_scale_details_safe
 # ---------------------------------------------------------------------------
 
 
-def test_recover_scale_safe_returns_none_when_marker_length_falsy():
-    mock_recon = MagicMock()
-    with patch("sfm_mvs_pipeline.scale.aruco_scale.recover_scale") as mock_recover:
-        result = recover_scale_safe(
-            reconstruction=mock_recon,
-            image_dir=Path("/nonexistent"),
-            marker_length_mm=None,
-            aruco_dict_id=0,
-            detections=None,
-            min_views=2,
-        )
+def test_recover_scale_details_safe_returns_none_when_marker_length_falsy():
+    scale_factor, marker_points, corners = recover_scale_details_safe(
+        reconstruction=MagicMock(),
+        image_dir=Path("/nonexistent"),
+        marker_length_mm=None,
+        aruco_dict_id=0,
+        detections=None,
+        min_views=2,
+    )
 
-    assert result is None
-    mock_recover.assert_not_called()
+    assert scale_factor is None
+    assert marker_points is None
+    assert corners is None
 
 
-def test_recover_scale_safe_returns_factor_on_success():
+def test_recover_scale_details_safe_returns_factor_on_success():
     """End-to-end through the real triangulation path with synthetic geometry."""
     side_recon = 10.0
     marker_world = np.array(
@@ -246,7 +244,7 @@ def test_recover_scale_safe_returns_factor_on_success():
     expected_scale = marker_length_mm / side_recon
     mock_recon, detections = _make_mock_reconstruction(marker_world, expected_scale)
 
-    result = recover_scale_safe(
+    scale_factor, _, _ = recover_scale_details_safe(
         reconstruction=mock_recon,
         image_dir=Path("/nonexistent"),
         marker_length_mm=marker_length_mm,
@@ -255,11 +253,11 @@ def test_recover_scale_safe_returns_factor_on_success():
         min_views=2,
     )
 
-    assert result is not None
-    assert abs(result - expected_scale) / expected_scale < 0.01
+    assert scale_factor is not None
+    assert abs(scale_factor - expected_scale) / expected_scale < 0.01
 
 
-def test_recover_scale_and_markers_safe_returns_corner_points():
+def test_recover_scale_details_safe_returns_corner_points():
     """Marker corner positions (SfM units) come back alongside the factor."""
     side_recon = 10.0
     marker_world = np.array(
@@ -275,7 +273,7 @@ def test_recover_scale_and_markers_safe_returns_corner_points():
         marker_world, marker_length_mm / side_recon
     )
 
-    scale_factor, marker_points = recover_scale_and_markers_safe(
+    scale_factor, marker_points, _ = recover_scale_details_safe(
         reconstruction=mock_recon,
         image_dir=Path("/nonexistent"),
         marker_length_mm=marker_length_mm,
@@ -290,8 +288,8 @@ def test_recover_scale_and_markers_safe_returns_corner_points():
     np.testing.assert_allclose(marker_points, marker_world, atol=0.1)
 
 
-def test_recover_scale_and_markers_safe_none_when_disabled():
-    scale_factor, marker_points = recover_scale_and_markers_safe(
+def test_recover_scale_details_safe_none_when_disabled():
+    scale_factor, marker_points, corners = recover_scale_details_safe(
         reconstruction=MagicMock(),
         image_dir=Path("/nonexistent"),
         marker_length_mm=None,
@@ -301,16 +299,18 @@ def test_recover_scale_and_markers_safe_none_when_disabled():
     )
     assert scale_factor is None
     assert marker_points is None
+    assert corners is None
 
 
-def test_recover_scale_safe_returns_none_on_runtime_error(caplog):
+def test_recover_scale_details_safe_returns_none_on_runtime_error(caplog):
+    """A triangulation failure is swallowed: outputs stay in SfM units."""
     mock_recon = MagicMock()
     with patch(
-        "sfm_mvs_pipeline.scale.aruco_scale.recover_scale",
+        "sfm_mvs_pipeline.scale.aruco_scale.triangulate_marker_corners",
         side_effect=RuntimeError("No ArUco markers could be triangulated"),
     ):
         with caplog.at_level("WARNING"):
-            result = recover_scale_safe(
+            scale_factor, marker_points, corners = recover_scale_details_safe(
                 reconstruction=mock_recon,
                 image_dir=Path("/nonexistent"),
                 marker_length_mm=50.0,
@@ -319,5 +319,7 @@ def test_recover_scale_safe_returns_none_on_runtime_error(caplog):
                 min_views=2,
             )
 
-    assert result is None
+    assert scale_factor is None
+    assert marker_points is None
+    assert corners is None
     assert "Scale recovery failed" in caplog.text

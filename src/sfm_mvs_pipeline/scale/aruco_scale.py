@@ -247,46 +247,6 @@ def recover_scale_details_safe(
         return None, None, None
 
 
-def recover_scale_and_markers_safe(
-    reconstruction: pycolmap.Reconstruction,
-    image_dir: Path,
-    marker_length_mm: float | None,
-    aruco_dict_id: int,
-    detections: dict[str, list[dict]] | None,
-    min_views: int,
-) -> tuple[float | None, np.ndarray | None]:
-    """recover_scale_details_safe for callers that don't need per-marker corners."""
-    scale_factor, marker_points, _ = recover_scale_details_safe(
-        reconstruction=reconstruction,
-        image_dir=image_dir,
-        marker_length_mm=marker_length_mm,
-        aruco_dict_id=aruco_dict_id,
-        detections=detections,
-        min_views=min_views,
-    )
-    return scale_factor, marker_points
-
-
-def recover_scale_safe(
-    reconstruction: pycolmap.Reconstruction,
-    image_dir: Path,
-    marker_length_mm: float | None,
-    aruco_dict_id: int,
-    detections: dict[str, list[dict]] | None,
-    min_views: int,
-) -> float | None:
-    """recover_scale_and_markers_safe for callers that only need the factor."""
-    scale_factor, _ = recover_scale_and_markers_safe(
-        reconstruction=reconstruction,
-        image_dir=image_dir,
-        marker_length_mm=marker_length_mm,
-        aruco_dict_id=aruco_dict_id,
-        detections=detections,
-        min_views=min_views,
-    )
-    return scale_factor
-
-
 def apply_scale_to_ply(ply_path: Path, scale: float) -> None:
     """Multiply all XYZ coordinates in a point-cloud PLY by scale in-place."""
     pcd = o3d.io.read_point_cloud(str(ply_path))
