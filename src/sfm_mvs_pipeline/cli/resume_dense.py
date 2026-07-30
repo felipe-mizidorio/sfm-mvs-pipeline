@@ -10,17 +10,10 @@ import yaml
 
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
-    run_poisson_lcc,
+    run_post_fusion,
     run_sor,
-    write_pipeline_manifest,
+    with_fusion_mask_provenance,
 )
-from sfm_mvs_pipeline.scale.aruco_scale import (
-    apply_scale_to_mesh,
-    apply_scale_to_ply,
-    recover_scale_details_safe,
-)
-from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
-from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.reconstruction import load_best_reconstruction
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -33,7 +26,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Resume pipeline from existing dense.ply: SOR + scale recovery + Poisson + LCC."
     )
@@ -46,7 +39,21 @@ def main() -> None:
     parser.add_argument(
         "--mesh-config", default=_REPO_ROOT / "configs/mesh.yaml", type=Path
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--allow-unscaled",
+        action="store_true",
+        help="Continue even if metric scale recovery fails, writing output in "
+        "arbitrary SfM units. OFF by default: without this flag a failed scale "
+        "recovery is a hard stop, because the alternative is a complete, "
+        "plausible-looking mesh whose numbers are not millimetres. Artefacts "
+        "written under this flag are renamed to *.UNSCALED_sfm_units.* and the "
+        "manifest records scale.status 'unscaled'.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = _parse_args()
 
     with args.aruco_config.open() as f:
         aruco_cfg = yaml.safe_load(f).get("aruco", {})
@@ -85,49 +92,28 @@ def main() -> None:
     logger.info("=== Point cloud filtering (SOR) ===")
     dense_filtered_ply, sor_stats = run_sor(dense_ply, output_dir, filter_cfg)
 
-    # Scale recovery.
-    marker_length_mm = aruco_cfg.get("marker_length_mm")
-    scale_factor, _, corners_by_marker = recover_scale_details_safe(
+    # Provenance: no stereo fusion happens on this path, so the fusion-mask
+    # block is always recorded as disabled; run_post_fusion adds the membrane
+    # block. The input dense.ply is left untouched (it is the operator-supplied
+    # input, and scaling it in place would double-scale on a re-run).
+    provenance = build_provenance(
+        args.frames_manifest, {"aruco": aruco_cfg, "mesh": mesh_cfg}
+    )
+    with_fusion_mask_provenance(provenance, enabled=False)
+
+    run_post_fusion(
+        output_dir=output_dir,
+        run_script="sfm-mvs-resume-dense",
         reconstruction=reconstruction,
         image_dir=args.image_dir,
-        marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
-        aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
-        detections=manifest_detections,
-        min_views=int(aruco_cfg.get("min_views", 2)),
-    )
-    scale_sanity = check_marker_layout(
-        corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
-    )
-    scale_self_consistency = check_scale_self_consistency(
-        corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
-    )
-    # Poisson + LCC.
-    logger.info("=== Poisson surface reconstruction + LCC ===")
-    _, lcc_stats = run_poisson_lcc(
-        dense_filtered_ply,
-        mesh_ply,
-        output_dir,
-        mesh_cfg["poisson_surface_reconstruction"],
-    )
-
-    # Scale is applied once per file, after meshing: scaling dense_filtered_ply
-    # before Poisson would double-scale the mesh derived from it.
-    if scale_factor is not None:
-        apply_scale_to_ply(dense_filtered_ply, scale_factor)
-        apply_scale_to_mesh(mesh_ply, scale_factor)
-
-    write_pipeline_manifest(
-        output_dir,
-        "sfm-mvs-resume-dense",
-        sor_stats,
-        lcc_stats,
-        mesh_cfg["poisson_surface_reconstruction"],
-        scale_factor,
-        scale_sanity=scale_sanity,
-        scale_self_consistency=scale_self_consistency,
-        provenance=build_provenance(
-            args.frames_manifest, {"aruco": aruco_cfg, "mesh": mesh_cfg}
-        ),
+        aruco_cfg=aruco_cfg,
+        mesh_cfg=mesh_cfg,
+        dense_filtered_ply=dense_filtered_ply,
+        sor_stats=sor_stats,
+        mesh_ply=mesh_ply,
+        provenance=provenance,
+        manifest_detections=manifest_detections,
+        allow_unscaled=args.allow_unscaled,
     )
 
     logger.info("Resume complete. Outputs in '%s'", output_dir)

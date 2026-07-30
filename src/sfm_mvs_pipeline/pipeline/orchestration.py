@@ -11,6 +11,8 @@ import hashlib
 import json
 import logging
 import platform
+import sys
+from collections.abc import Sequence
 from pathlib import Path
 
 import cv2
@@ -23,8 +25,25 @@ from sfm_mvs_pipeline.mesh.surface_reconstruction import (
     _apply_taubin,
     _run_poisson,
 )
-from sfm_mvs_pipeline.postprocess.membrane_filter import filter_membrane_points
+from sfm_mvs_pipeline.postprocess.membrane_filter import (
+    DEFAULT_MARKER_MARGIN_MM,
+    DEFAULT_PALE_THRESHOLD,
+    filter_membrane_points,
+)
 from sfm_mvs_pipeline.postprocess.point_cloud_filter import filter_point_cloud
+from sfm_mvs_pipeline.scale.aruco_scale import (
+    apply_scale_to_mesh,
+    apply_scale_to_ply,
+    recover_scale_details_safe,
+)
+from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
+from sfm_mvs_pipeline.scale.policy import (
+    UnscaledOutputError,
+    enforce_scale_policy,
+    resolve_scale_status,
+    unscaled_artifact_path,
+)
+from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 
 logger = logging.getLogger(__name__)
 
@@ -467,6 +486,141 @@ def run_membrane_filter(
     o3d.io.write_point_cloud(str(out_ply), filtered)
     logger.info("Membrane-filtered cloud saved to '%s'", out_ply)
     return out_ply, stats
+
+
+def run_post_fusion(
+    *,
+    output_dir: Path,
+    run_script: str,
+    reconstruction: pycolmap.Reconstruction,
+    image_dir: Path,
+    aruco_cfg: dict,
+    mesh_cfg: dict,
+    dense_filtered_ply: Path,
+    sor_stats: dict,
+    mesh_ply: Path,
+    provenance: dict,
+    manifest_detections: dict | None = None,
+    head_radius_override: float | None = None,
+    allow_unscaled: bool = False,
+    membrane_filter: bool = False,
+    membrane_pale_threshold: float = DEFAULT_PALE_THRESHOLD,
+    membrane_marker_margin_mm: float = DEFAULT_MARKER_MARGIN_MM,
+    extra_scale_plys: Sequence[Path] = (),
+) -> Path:
+    """Shared post-fusion backbone: scale → gate → crop → membrane → Poisson → manifest.
+
+    All three CLI entrypoints run the same sequence after they have a
+    SOR-filtered dense cloud; only the fusion-time work before it and the exact
+    set of PLYs to scale differ. The caller supplies the SOR-filtered cloud, a
+    ``provenance`` dict already carrying its own blocks (environment, resolved
+    configs, and — where relevant — the ``fusion_masks`` block), and any
+    ``extra_scale_plys`` written earlier that must be scaled/renamed alongside
+    the standard clouds (e.g. the raw ``dense.ply`` for the resume-from-MVS run).
+
+    The scale gate (`enforce_scale_policy`) exits the process on a hard stop, so
+    a failed scale recovery cannot produce a finished, metric-looking mesh
+    unless the caller passed ``allow_unscaled``.
+
+    Returns:
+        The final mesh path — the same ``mesh_ply``, or its
+        ``UNSCALED_sfm_units`` rename when the run proceeded without scale.
+    """
+    # --- Metric scale recovery (before the crop: the auto crop radius is
+    # derived in millimetres and converted to SfM units via the scale) ---
+    marker_length_mm = aruco_cfg.get("marker_length_mm")
+    scale_factor, marker_points, corners_by_marker = recover_scale_details_safe(
+        reconstruction=reconstruction,
+        image_dir=image_dir,
+        marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
+        aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
+        detections=manifest_detections,
+        min_views=int(aruco_cfg.get("min_views", 2)),
+    )
+    scale_sanity = check_marker_layout(
+        corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
+    )
+    scale_self_consistency = check_scale_self_consistency(
+        corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
+    )
+
+    # Gate before the crop and the mesh: a failed scale recovery must not be
+    # able to produce a finished, metric-looking mesh by default.
+    scale_status = resolve_scale_status(scale_factor, scale_sanity)
+    try:
+        enforce_scale_policy(scale_status, allow_unscaled=allow_unscaled)
+    except UnscaledOutputError as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+
+    # --- Spherical crop to head region (auto-sized from ArUco) ---
+    cropped_ply, crop_stats = run_head_crop(
+        dense_filtered_ply,
+        output_dir,
+        reconstruction,
+        head_radius_override=head_radius_override,
+        scale_factor=scale_factor,
+        marker_points=marker_points,
+    )
+    sor_stats.update(crop_stats)
+
+    # --- Optional membrane filter (opt-in, off by default) ---
+    input_for_poisson = cropped_ply
+    membrane_stats: dict | None = None
+    if membrane_filter:
+        input_for_poisson, membrane_stats = run_membrane_filter(
+            cropped_ply,
+            output_dir,
+            marker_corners=corners_by_marker,
+            pale_threshold=membrane_pale_threshold,
+            marker_margin_mm=membrane_marker_margin_mm,
+            scale_factor=scale_factor,
+        )
+
+    # --- Poisson reconstruction + LCC ---
+    logger.info("=== Poisson surface reconstruction + LCC ===")
+    _, lcc_stats = run_poisson_lcc(
+        input_for_poisson,
+        mesh_ply,
+        output_dir,
+        mesh_cfg["poisson_surface_reconstruction"],
+    )
+
+    # Scale is applied once per file, after meshing: scaling a cloud before
+    # Poisson would double-scale the mesh derived from it. dict.fromkeys
+    # de-duplicates while preserving order, so a run where the crop or the
+    # membrane filter was skipped does not touch the same file twice.
+    scale_targets = dict.fromkeys(
+        [*extra_scale_plys, dense_filtered_ply, cropped_ply, input_for_poisson]
+    )
+    if scale_factor is not None:
+        for ply in scale_targets:
+            apply_scale_to_ply(ply, scale_factor)
+        apply_scale_to_mesh(mesh_ply, scale_factor)
+        logger.info("Applied scale %.6f mm/unit to outputs.", scale_factor)
+    else:
+        # Reached only under allow_unscaled. Rename every artefact so a stray
+        # file cannot later be mistaken for metric output.
+        for ply in scale_targets:
+            ply.rename(unscaled_artifact_path(ply))
+        mesh_ply = mesh_ply.rename(unscaled_artifact_path(mesh_ply))
+
+    with_membrane_filter_provenance(
+        provenance, enabled=membrane_filter, stats=membrane_stats
+    )
+    write_pipeline_manifest(
+        output_dir,
+        run_script,
+        sor_stats,
+        lcc_stats,
+        mesh_cfg["poisson_surface_reconstruction"],
+        scale_factor,
+        scale_sanity=scale_sanity,
+        scale_self_consistency=scale_self_consistency,
+        scale_status=scale_status,
+        provenance=provenance,
+    )
+    return mesh_ply
 
 
 def write_pipeline_manifest(

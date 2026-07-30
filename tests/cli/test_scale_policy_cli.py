@@ -11,7 +11,11 @@ import sys
 
 import pytest
 
-_SCRIPTS = ["sfm_mvs_pipeline.cli.run", "sfm_mvs_pipeline.cli.resume_mvs"]
+_SCRIPTS = [
+    "sfm_mvs_pipeline.cli.run",
+    "sfm_mvs_pipeline.cli.resume_mvs",
+    "sfm_mvs_pipeline.cli.resume_dense",
+]
 
 
 def _load_script(name: str):

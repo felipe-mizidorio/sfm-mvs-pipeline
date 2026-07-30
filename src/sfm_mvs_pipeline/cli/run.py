@@ -15,31 +15,14 @@ from sfm_mvs_pipeline.mvs.fusion import fuse_depth_maps
 from sfm_mvs_pipeline.mvs.mask_undistortion import undistort_masks_safe
 from sfm_mvs_pipeline.pipeline.orchestration import (
     build_provenance,
-    run_head_crop,
-    run_membrane_filter,
-    run_poisson_lcc,
+    run_post_fusion,
     run_sor,
     with_fusion_mask_provenance,
-    with_membrane_filter_provenance,
-    write_pipeline_manifest,
 )
 from sfm_mvs_pipeline.postprocess.membrane_filter import (
     DEFAULT_MARKER_MARGIN_MM,
     DEFAULT_PALE_THRESHOLD,
 )
-from sfm_mvs_pipeline.scale.aruco_scale import (
-    apply_scale_to_mesh,
-    apply_scale_to_ply,
-    recover_scale_details_safe,
-)
-from sfm_mvs_pipeline.scale.layout_check import check_marker_layout
-from sfm_mvs_pipeline.scale.policy import (
-    UnscaledOutputError,
-    enforce_scale_policy,
-    resolve_scale_status,
-    unscaled_artifact_path,
-)
-from sfm_mvs_pipeline.scale.self_consistency import check_scale_self_consistency
 from sfm_mvs_pipeline.sfm.feature_extraction import (
     camera_prior_from_manifest,
     extract_features,
@@ -383,83 +366,8 @@ def main() -> None:
     logger.info("=== Step 5b/7: Point cloud filtering (SOR) ===")
     dense_filtered_ply, sor_stats = run_sor(dense_ply, output_dir, filter_cfg)
 
-    # --- Metric scale recovery (before the crop: the auto crop radius is
-    # derived in millimetres and converted to SfM units via the scale) ---
-    marker_length_mm = aruco_cfg.get("marker_length_mm")
-    scale_factor, marker_points, corners_by_marker = recover_scale_details_safe(
-        reconstruction=reconstructions[best_model_idx],
-        image_dir=args.image_dir,
-        marker_length_mm=float(marker_length_mm) if marker_length_mm else None,
-        aruco_dict_id=int(aruco_cfg.get("dict_id", 0)),
-        detections=manifest_detections,
-        min_views=int(aruco_cfg.get("min_views", 2)),
-    )
-    scale_sanity = check_marker_layout(
-        corners_by_marker or {}, scale_factor, aruco_cfg.get("layout_check")
-    )
-    scale_self_consistency = check_scale_self_consistency(
-        corners_by_marker or {}, float(marker_length_mm) if marker_length_mm else None
-    )
-
-    # Gate before the crop and the mesh: a failed scale recovery must not be
-    # able to produce a finished, metric-looking mesh by default.
-    scale_status = resolve_scale_status(scale_factor, scale_sanity)
-    try:
-        enforce_scale_policy(scale_status, allow_unscaled=args.allow_unscaled)
-    except UnscaledOutputError as exc:
-        logger.error("%s", exc)
-        sys.exit(1)
-
-    # --- Step 5c/7: Spherical crop to head region (auto-sized from ArUco) ---
-    cropped_ply, crop_stats = run_head_crop(
-        dense_filtered_ply,
-        output_dir,
-        reconstructions[best_model_idx],
-        head_radius_override=args.head_radius,
-        scale_factor=scale_factor,
-        marker_points=marker_points,
-    )
-    sor_stats.update(crop_stats)
-
-    # --- Step 5d/7: Optional membrane filter (opt-in, off by default) ---
-    input_for_poisson = cropped_ply
-    membrane_stats: dict | None = None
-    if args.membrane_filter:
-        input_for_poisson, membrane_stats = run_membrane_filter(
-            cropped_ply,
-            output_dir,
-            marker_corners=corners_by_marker,
-            pale_threshold=args.membrane_pale_threshold,
-            marker_margin_mm=args.membrane_marker_margin_mm,
-            scale_factor=scale_factor,
-        )
-
-    # --- Step 6/7: Poisson reconstruction + LCC ---
-    logger.info("=== Step 6/7: Surface (Poisson) reconstruction + LCC ===")
-    _, lcc_stats = run_poisson_lcc(
-        input_for_poisson,
-        mesh_ply,
-        output_dir,
-        mesh_cfg["poisson_surface_reconstruction"],
-    )
-
-    # Scale is applied once per file, after meshing: scaling dense_filtered_ply
-    # before Poisson would double-scale the mesh derived from it.
-    if scale_factor is not None:
-        # Each written cloud scaled exactly once. dict.fromkeys de-duplicates
-        # while preserving order, so a run where the crop or the membrane filter
-        # was skipped does not scale the same file twice.
-        for ply in dict.fromkeys([dense_filtered_ply, cropped_ply, input_for_poisson]):
-            apply_scale_to_ply(ply, scale_factor)
-        apply_scale_to_mesh(mesh_ply, scale_factor)
-    else:
-        # Reached only under --allow-unscaled. Rename every artefact so a stray
-        # file cannot later be mistaken for metric output.
-        for ply in dict.fromkeys([dense_filtered_ply, cropped_ply, input_for_poisson]):
-            ply.rename(unscaled_artifact_path(ply))
-        mesh_ply = mesh_ply.rename(unscaled_artifact_path(mesh_ply))
-
-    # --- Step 7/7: Pipeline manifest ---
+    # --- Provenance: the fusion-mask block is recorded here (fusion is done
+    # before the shared backbone); run_post_fusion adds the membrane block. ---
     provenance = build_provenance(
         args.frames_manifest,
         {"aruco": aruco_cfg, "colmap": colmap_cfg, "mesh": mesh_cfg},
@@ -472,20 +380,25 @@ def main() -> None:
         workspace_mask_dir=fusion_mask_dir,
         stats=fusion_mask_stats,
     )
-    with_membrane_filter_provenance(
-        provenance, enabled=args.membrane_filter, stats=membrane_stats
-    )
-    write_pipeline_manifest(
-        output_dir,
-        "sfm-mvs-run",
-        sor_stats,
-        lcc_stats,
-        mesh_cfg["poisson_surface_reconstruction"],
-        scale_factor,
-        scale_sanity=scale_sanity,
-        scale_self_consistency=scale_self_consistency,
-        scale_status=scale_status,
+
+    # --- Steps 5c–7/7: scale gate → crop → membrane → Poisson → manifest ---
+    mesh_ply = run_post_fusion(
+        output_dir=output_dir,
+        run_script="sfm-mvs-run",
+        reconstruction=reconstructions[best_model_idx],
+        image_dir=args.image_dir,
+        aruco_cfg=aruco_cfg,
+        mesh_cfg=mesh_cfg,
+        dense_filtered_ply=dense_filtered_ply,
+        sor_stats=sor_stats,
+        mesh_ply=mesh_ply,
         provenance=provenance,
+        manifest_detections=manifest_detections,
+        head_radius_override=args.head_radius,
+        allow_unscaled=args.allow_unscaled,
+        membrane_filter=args.membrane_filter,
+        membrane_pale_threshold=args.membrane_pale_threshold,
+        membrane_marker_margin_mm=args.membrane_marker_margin_mm,
     )
 
     # --- Optional: Evaluation ---
